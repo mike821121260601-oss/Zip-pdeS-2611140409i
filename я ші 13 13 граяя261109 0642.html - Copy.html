@@ -1,0 +1,842 @@
+       <!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#101014">
+<title>Шахи «Варіант»</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;
+     -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  html,body{height:100%;overflow:hidden;background:#101014;color:#eee;
+     font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+  #boards{position:fixed;inset:0;display:flex;flex-wrap:wrap;background:#101014}
+  #boards.two{flex-direction:column}
+  #boards.two .wrap{width:100%;height:50%}
+  #boards.four{flex-direction:row}
+  #boards.four .wrap{width:50%;height:50%}
+  .wrap{position:relative;overflow:hidden}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+
+  #menuBtn{position:fixed;top:4px;right:4px;z-index:30;width:42px;height:42px;
+     border-radius:21px;border:1px solid #666;background:rgba(0,0,0,.6);
+     color:#fff;font-size:20px;line-height:1;cursor:pointer}
+
+  #menu{position:fixed;inset:0;z-index:40;background:rgba(8,8,14,.97);
+     display:flex;flex-direction:column;padding:8px;overflow:auto}
+  #menu.hidden{display:none}
+  .mhead{display:flex;align-items:center;justify-content:space-between;
+     gap:8px;padding-bottom:6px;border-bottom:1px solid #333;margin-bottom:6px}
+  .mhead b{font-size:14px}
+  #closeMenu{width:36px;height:36px;border-radius:18px;border:1px solid #666;
+     background:#222;color:#fff;font-size:18px;cursor:pointer}
+  .mrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px}
+  .btn{border:1px solid #555;background:#1d1d24;color:#eee;padding:6px 10px;
+     border-radius:8px;font-size:12px;cursor:pointer}
+  .btn.on{background:#2b5d2b;border-color:#4a4}
+  .chk{display:flex;align-items:center;gap:6px;font-size:12px;
+     border:1px solid #444;padding:5px 8px;border-radius:8px;background:#16161c}
+  .cols{display:flex;gap:8px;flex:1;min-height:0}
+  .col{flex:1;background:#14141a;border:1px solid #2a2a33;border-radius:8px;
+     padding:7px 8px;font-size:10.5px;line-height:1.3;overflow:auto}
+  .col h3{font-size:12px;margin-bottom:5px;color:#9fd}
+  .col b{color:#fc6}
+  .col p{margin:0 0 4px}
+  .k{color:#8cf;font-weight:600}
+</style>
+</head>
+<body>
+
+<div id="boards" class="two"></div>
+<button id="menuBtn" title="Меню / Menu">☰</button>
+
+<div id="menu" class="hidden">
+  <div class="mhead">
+    <b>Шахи «Варіант» · Chess Variant</b>
+    <button id="closeMenu">✕</button>
+  </div>
+
+  <div class="mrow">
+    <button class="btn" id="newGameBtn">Нова гра / New game</button>
+    <button class="btn" id="fideBtn">Фігури: СВОЇ / Custom</button>
+    <button class="btn" id="undoBtn2">↶ Undo</button>
+    <button class="btn" id="redoBtn2">↷ Redo</button>
+    <span style="font-size:11px;color:#888">1 / 2 / 4 дошки — автоматично</span>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <h3>ПРАВИЛА (УКРАЇНСЬКА)</h3>
+      <p><b>Мета:</b> з'їсти короля суперника. Матів немає — короля просто з'їдають.</p>
+      <p><b>Черговість:</b> червоні → сині → червоні → сині …</p>
+      <p><span class="k">ПІШАК</span> — 1 крок у будь-який із 8 боків: на порожню клітинку або на чужу фігуру (з'їдає).</p>
+      <p><b>Далекий хід пішака:</b> 2–6 клітинок по прямій (8 напрямків). Шлях мусить бути порожній, клітинка призначення — порожня. Після такого ходу <b>ПОПЕРЕДУ</b> пішака з'являється нова фігура:</p>
+      <p>2 → <b>кінь</b> · 3 → <b>слон</b> · 4 → <b>тура</b> · 5 → <b>ферзь</b> · 6 → <b>король</b></p>
+      <p><span class="k">КІНЬ</span> — звичайний стрибок «Г». Додатково: якщо сусідня клітинка (у 8 боках) зайнята будь-якою фігурою, а клітинка одразу за нею порожня — кінь перестрибує через неї і стає туди (перестриб обов'язковий).</p>
+      <p><span class="k">СЛОН</span> — по діагоналі, будь-яка відстань.</p>
+      <p><span class="k">ТУРА</span> — по вертикалі/горизонталі, будь-яка відстань.</p>
+      <p><span class="k">ФЕРЗЬ</span> — вертикаль + горизонталь + діагональ, будь-яка відстань.</p>
+      <p><span class="k">КОРОЛЬ</span> — 1 клітинка в будь-який бік.</p>
+      <p><b>Рокіровки немає.</b> Перетворення пішака у ферзя немає — є поява фігур (див. вище).</p>
+      <p><b>Очки:</b> пішак 1 · кінь 3 · слон 3 · тура 5 · ферзь 10 · король 55.</p>
+      <p><b>Додатковий рахунок:</b> ферзь 11 · король 111. Пишеться після основного через 2 пробіли.</p>
+      <p><b>Кнопки ↶ ↷</b> (назад/вперед) з'являються випадково на порожніх клітинках після кожного ходу.</p>
+      <p><b>Дошки:</b> на телефоні 2, на планшеті 4 — якщо частина сенсора не працює, грайте на будь-якій.</p>
+    </div>
+
+    <div class="col">
+      <h3>RULES (ENGLISH)</h3>
+      <p><b>Goal:</b> capture the enemy king. There is no check/mate — the king is simply eaten.</p>
+      <p><b>Turn order:</b> red → blue → red → blue …</p>
+      <p><span class="k">PAWN</span> — 1 step in any of the 8 directions: to an empty square or onto an enemy piece (captures).</p>
+      <p><b>Long pawn move:</b> 2–6 squares in a straight line (8 directions). The path must be clear and the destination empty. After such a move a <b>NEW piece appears IN FRONT of the pawn</b>:</p>
+      <p>2 → <b>knight</b> · 3 → <b>bishop</b> · 4 → <b>rook</b> · 5 → <b>queen</b> · 6 → <b>king</b></p>
+      <p><span class="k">KNIGHT</span> — normal «L» jump. Extra: if an adjacent square (any of 8) holds any piece and the square right behind it is empty, the knight hops over it and lands there (the hop is mandatory).</p>
+      <p><span class="k">BISHOP</span> — diagonals, any distance.</p>
+      <p><span class="k">ROOK</span> — files and ranks, any distance.</p>
+      <p><span class="k">QUEEN</span> — files, ranks and diagonals, any distance.</p>
+      <p><span class="k">KING</span> — 1 square in any direction.</p>
+      <p><b>No castling.</b> No queen promotion — pieces appear instead (see above).</p>
+      <p><b>Points:</b> pawn 1 · knight 3 · bishop 3 · rook 5 · queen 10 · king 55.</p>
+      <p><b>Extra score:</b> queen 11 · king 111. Written after the main score, separated by 2 spaces.</p>
+      <p><b>↶ ↷ buttons</b> (back / forward) appear randomly on empty squares after every move.</p>
+      <p><b>Boards:</b> 2 on phones, 4 on tablets — use any of them if part of your touchscreen is broken.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ============================================================
+   КОНСТАНТИ
+   ============================================================ */
+const COLS = 8, ROWS = 11;
+
+const SPAWN = {2:'N', 3:'B', 4:'R', 5:'Q', 6:'K'};
+const VAL   = {P:1, N:3, B:3, R:5, Q:10, K:55};
+const SUB   = {Q:11, K:111};
+
+const DIR8 = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+const DIAG = [[-1,-1],[-1,1],[1,-1],[1,1]];
+const ORTH = [[-1,0],[1,0],[0,-1],[0,1]];
+const NL   = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+
+/* кольори дощок: [hue, sat, light] — світліше/темніше чергується */
+const PALETTES = [
+  [[ 52, 82, 62], [  0,  0, 88]],   // 1: жовте + світло-сіре
+  [[128, 42, 50], [268, 58, 80]],   // 2: зелене + світло-фіолетове
+  [[ 28, 46, 62], [ 30, 84, 72]],   // 3: світло-коричневе + світло-оранжеве
+  [[ 75, 62, 66], [168, 46, 62]]    // 4: жовто-зелене + синьо-зелене
+];
+
+/* ============================================================
+   СТАН
+   ============================================================ */
+let G = null;
+let boards = [];
+let layouts = [];
+let fideStyle = false;
+const boardsEl = document.getElementById('boards');
+
+/* ============================================================
+   ІНІЦІАЛІЗАЦІЯ ГРИ
+   ============================================================ */
+function newGame(){
+  const b = Array.from({length:ROWS}, ()=>Array(COLS).fill(null));
+
+  const back = ['R','Q','R','K','Q','R','Q','R'];   // 4 тури, 3 ферзі, 1 король
+  const r1   = ['N','N','N','B','N','N','N','N'];   // 7 коней + 1 слон
+  const b1   = ['N','N','B','N','B','N','N','N'];   // 6 коней + 2 слони
+  // разом коней = 13
+
+  for(let c=0;c<COLS;c++){
+    b[0][c]        = {t:back[c], c:'R'};
+    b[1][c]        = {t:r1[c],   c:'R'};
+    b[2][c]        = {t:'P',     c:'R'};
+    b[ROWS-3][c]   = {t:'P',     c:'B'};
+    b[ROWS-2][c]   = {t:b1[c],   c:'B'};
+    b[ROWS-1][c]   = {t:back[c], c:'B'};
+  }
+
+  G = {
+    board: b,
+    turn: 'R',
+    score: {R:{a:0,b:0}, B:{a:0,b:0}},
+    sel: null,
+    moves: [],
+    buttons: [],
+    over: null,
+    history: [],
+    future: []
+  };
+  placeButtons();
+}
+
+/* ============================================================
+   ГЕНЕРАЦІЯ ХОДІВ
+   ============================================================ */
+const inside = (r,c)=> r>=0 && r<ROWS && c>=0 && c<COLS;
+
+function movesFor(board, r, c){
+  const p = board[r][c];
+  if(!p) return [];
+  const res = [];
+  const canLand = (rr,cc)=> inside(rr,cc) && (!board[rr][cc] || board[rr][cc].c !== p.c);
+
+  if(p.t === 'P'){
+    /* --- 1 крок у 8 боків --- */
+    for(const [dr,dc] of DIR8){
+      const nr=r+dr, nc=c+dc;
+      if(canLand(nr,nc)) res.push({r:nr, c:nc, spawn:null});
+    }
+    /* --- далекий хід 2..6 + поява фігури попереду --- */
+    for(const [dr,dc] of DIR8){
+      for(let d=2; d<=6; d++){
+        const nr=r+dr*d, nc=c+dc*d;
+        if(!inside(nr,nc)) break;
+        let clear = true;
+        for(let k=1;k<d;k++){
+          if(board[r+dr*k][c+dc*k]){ clear=false; break; }
+        }
+        if(!clear) break;
+        if(board[nr][nc]) break;                 // призначення має бути порожнім
+        const sr=r+dr*(d+1), sc=c+dc*(d+1);
+        let sp = null;
+        if(inside(sr,sc) && !board[sr][sc]){
+          sp = {t:SPAWN[d], r:sr, c:sc};
+        }
+        res.push({r:nr, c:nc, spawn:sp});
+      }
+    }
+  }
+
+  else if(p.t === 'N'){
+    /* --- звичайний стрибок «Г» --- */
+    for(const [dr,dc] of NL){
+      const nr=r+dr, nc=c+dc;
+      if(canLand(nr,nc)) res.push({r:nr, c:nc, spawn:null});
+    }
+    /* --- перестриб через сусідню фігуру --- */
+    for(const [dr,dc] of DIR8){
+      const ar=r+dr, ac=c+dc, br=r+2*dr, bc=c+2*dc;
+      if(inside(ar,ac) && board[ar][ac] && inside(br,bc) && !board[br][bc]){
+        res.push({r:br, c:bc, spawn:null});
+      }
+    }
+  }
+
+  else if(p.t === 'B' || p.t === 'R' || p.t === 'Q'){
+    const dirs = p.t==='B' ? DIAG : p.t==='R' ? ORTH : DIR8;
+    for(const [dr,dc] of dirs){
+      let nr=r+dr, nc=c+dc;
+      while(inside(nr,nc)){
+        if(!board[nr][nc]){
+          res.push({r:nr, c:nc, spawn:null});
+        } else {
+          if(board[nr][nc].c !== p.c) res.push({r:nr, c:nc, spawn:null});
+          break;
+        }
+        nr+=dr; nc+=dc;
+      }
+    }
+  }
+
+  else if(p.t === 'K'){
+    for(const [dr,dc] of DIR8){
+      const nr=r+dr, nc=c+dc;
+      if(canLand(nr,nc)) res.push({r:nr, c:nc, spawn:null});
+    }
+  }
+
+  /* прибрати дублікати */
+  const seen = new Set(), out = [];
+  for(const m of res){
+    const k = m.r+':'+m.c;
+    if(seen.has(k)) continue;
+    seen.add(k); out.push(m);
+  }
+  return out;
+}
+
+/* ============================================================
+   ВИКОНАННЯ ХОДУ
+   ============================================================ */
+function snapshot(){
+  return JSON.stringify({b:G.board, t:G.turn, s:G.score});
+}
+function restore(str){
+  const o = JSON.parse(str);
+  G.board = o.b; G.turn = o.t; G.score = o.s;
+}
+
+function doMove(from, to){
+  if(!from) return;
+  G.history.push(snapshot());
+  if(G.history.length > 300) G.history.shift();
+  G.future.length = 0;
+
+  const p = G.board[from.r][from.c];
+  if(!p) return;
+  const target = G.board[to.r][to.c];
+
+  if(target){
+    G.score[p.c].a += VAL[target.t] || 0;
+    G.score[p.c].b += SUB[target.t] || 0;
+    if(target.t === 'K') G.over = p.c;
+  }
+
+  G.board[from.r][from.c] = null;
+  G.board[to.r][to.c] = p;
+
+  if(to.spawn && inside(to.spawn.r, to.spawn.c) && !G.board[to.spawn.r][to.spawn.c]){
+    G.board[to.spawn.r][to.spawn.c] = {t: to.spawn.t, c: p.c};
+  }
+
+  G.sel = null;
+  G.moves = [];
+  G.turn = (G.turn === 'R') ? 'B' : 'R';
+  placeButtons();
+}
+
+function undo(){
+  if(!G.history.length) return;
+  G.future.push(snapshot());
+  restore(G.history.pop());
+  G.sel = null; G.moves = []; G.over = null;
+  placeButtons();
+}
+function redo(){
+  if(!G.future.length) return;
+  G.history.push(snapshot());
+  restore(G.future.pop());
+  G.sel = null; G.moves = []; G.over = null;
+  placeButtons();
+}
+
+/* ============================================================
+   ВИПАДКОВІ КНОПКИ ↶ ↷ НА ПОРОЖНІХ КЛІТИНКАХ
+   ============================================================ */
+function placeButtons(){
+  const empties = [];
+  for(let r=0;r<ROWS;r++)
+    for(let c=0;c<COLS;c++)
+      if(!G.board[r][c]) empties.push({r,c});
+
+  for(let i=empties.length-1;i>0;i--){
+    const j = (Math.random()*(i+1))|0;
+    const t = empties[i]; empties[i]=empties[j]; empties[j]=t;
+  }
+
+  G.buttons = [];
+  if(empties[0]) G.buttons.push({r:empties[0].r, c:empties[0].c, kind:'undo'});
+  if(empties[1]) G.buttons.push({r:empties[1].r, c:empties[1].c, kind:'redo'});
+}
+
+/* ============================================================
+   КЛІК
+   ============================================================ */
+function handleClick(bi, x, y){
+  if(!G || G.over) return;
+  const L = layouts[bi];
+  if(!L) return;
+  const c = Math.floor((x - L.ox) / L.cell);
+  const r = Math.floor((y - L.oy) / L.cell);
+  if(r<0 || r>=ROWS || c<0 || c>=COLS) return;
+
+  /* кнопки undo / redo */
+  for(const b of G.buttons){
+    if(b.r === r && b.c === c){
+      if(b.kind === 'undo') undo(); else redo();
+      return;
+    }
+  }
+
+  /* хід на вільне місце */
+  const mv = G.moves.find(m => m.r===r && m.c===c);
+  if(mv){
+    doMove(G.sel, mv);
+    return;
+  }
+
+  /* вибір фігури */
+  const p = G.board[r][c];
+  if(p && p.c === G.turn){
+    G.sel = {r, c};
+    G.moves = movesFor(G.board, r, c);
+  } else {
+    G.sel = null;
+    G.moves = [];
+  }
+}
+
+/* ============================================================
+   КОЛЬОРИ
+   ============================================================ */
+function cellColor(bi, r, c, t){
+  const pal = PALETTES[bi % 4];
+  const p = pal[(r + c) % 2];
+  const L = p[2] + 6*Math.sin(t*0.0007 + bi*1.7 + (r*2 + c*3)*0.35);
+  return 'hsl(' + p[0] + ',' + p[1] + '%,' + L.toFixed(1) + '%)';
+}
+function pieceMain(color){
+  return color === 'R' ? 'hsl(0,72%,42%)' : 'hsl(222,72%,42%)';
+}
+
+/* ============================================================
+   МАЛЮВАННЯ ФІГУР
+   ============================================================ */
+function drawPieceShape(ctx, type, cx, cy, s, main, under, t, seed){
+  ctx.save();
+
+  if(fideStyle){ drawFideShape(ctx, type, cx, cy, s, main, under); ctx.restore(); return; }
+
+  switch(type){
+
+    /* ПІШАК: кружок + 4 трикутники */
+    case 'P': {
+      const R = s*0.20;
+      ctx.fillStyle = main;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.fill();
+
+      ctx.fillStyle = under;
+      for(let i=0;i<4;i++){
+        const a = i*Math.PI/2 + Math.PI/4;
+        const bx = cx + Math.cos(a)*R*0.95;
+        const by = cy + Math.sin(a)*R*0.95;
+        const px = cx + Math.cos(a)*s*0.42;
+        const py = cy + Math.sin(a)*s*0.42;
+        const pa = a + Math.PI/2, pb = a - Math.PI/2;
+        const w = s*0.13;
+        ctx.beginPath();
+        ctx.moveTo(bx + Math.cos(pa)*w, by + Math.sin(pa)*w);
+        ctx.lineTo(bx + Math.cos(pb)*w, by + Math.sin(pb)*w);
+        ctx.lineTo(px, py);
+        ctx.closePath();
+        ctx.fill();
+      }
+      break;
+    }
+
+    /* КІНЬ: великий круг + менший круг, що повільно обертається під краєм */
+    case 'N': {
+      const R = s*0.27;
+      ctx.fillStyle = main;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.fill();
+
+      const ang = t*0.00035*(0.5 + seed*1.6) + seed*6.2832;
+      const ox = cx + Math.cos(ang)*R;
+      const oy = cy + Math.sin(ang)*R;
+      ctx.fillStyle = under;
+      ctx.beginPath(); ctx.arc(ox, oy, R*0.5, 0, 6.2832); ctx.fill();
+      break;
+    }
+
+    /* СЛОН: 4 квадрати під 4 кути клітинки */
+    case 'B': {
+      const q  = s*0.21;
+      const off = s*0.245;
+      for(const [dx,dy] of [[-1,-1],[1,-1],[-1,1],[1,1]]){
+        const x = cx + dx*off, y = cy + dy*off;
+        ctx.fillStyle = main;
+        ctx.fillRect(x-q/2, y-q/2, q, q);
+        ctx.fillStyle = under;
+        ctx.fillRect(x-q/4, y-q/4, q/2, q/2);
+      }
+      break;
+    }
+
+    /* ТУРА: прямохрест («плюс») */
+    case 'R': {
+      const w = s*0.155, l = s*0.62;
+      ctx.fillStyle = main;
+      ctx.fillRect(cx-l/2, cy-w/2, l, w);
+      ctx.fillRect(cx-w/2, cy-l/2, w, l);
+      ctx.fillStyle = under;
+      ctx.beginPath(); ctx.arc(cx, cy, s*0.085, 0, 6.2832); ctx.fill();
+      break;
+    }
+
+    /* ФЕРЗЬ: квадрат */
+    case 'Q': {
+      ctx.fillStyle = main;
+      ctx.fillRect(cx-s*0.245, cy-s*0.245, s*0.49, s*0.49);
+      break;
+    }
+
+    /* КОРОЛЬ: квадрат + менший квадрат у центрі */
+    case 'K': {
+      ctx.fillStyle = main;
+      ctx.fillRect(cx-s*0.255, cy-s*0.255, s*0.51, s*0.51);
+      ctx.fillStyle = under;
+      ctx.fillRect(cx-s*0.115, cy-s*0.115, s*0.23, s*0.23);
+      break;
+    }
+  }
+  ctx.restore();
+}
+
+/* --- спрощені «фідешні» силуети --- */
+function drawFideShape(ctx, type, cx, cy, s, main, under){
+  ctx.fillStyle = main;
+  switch(type){
+    case 'P': {
+      ctx.beginPath(); ctx.arc(cx, cy-s*0.15, s*0.155, 0, 6.2832); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx-s*0.20, cy+s*0.27);
+      ctx.lineTo(cx-s*0.10, cy-s*0.01);
+      ctx.lineTo(cx+s*0.10, cy-s*0.01);
+      ctx.lineTo(cx+s*0.20, cy+s*0.27);
+      ctx.closePath(); ctx.fill();
+      break;
+    }
+    case 'N': {
+      ctx.beginPath();
+      ctx.moveTo(cx-s*0.20, cy+s*0.28);
+      ctx.lineTo(cx-s*0.16, cy-s*0.02);
+      ctx.lineTo(cx-s*0.03, cy-s*0.29);
+      ctx.lineTo(cx+s*0.20, cy-s*0.11);
+      ctx.lineTo(cx+s*0.06, cy+s*0.03);
+      ctx.lineTo(cx+s*0.19, cy+s*0.28);
+      ctx.closePath(); ctx.fill();
+      break;
+    }
+    case 'B': {
+      ctx.beginPath(); ctx.arc(cx, cy-s*0.16, s*0.11, 0, 6.2832); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy-s*0.03);
+      ctx.quadraticCurveTo(cx+s*0.21, cy+s*0.09, cx+s*0.16, cy+s*0.25);
+      ctx.lineTo(cx-s*0.16, cy+s*0.25);
+      ctx.quadraticCurveTo(cx-s*0.21, cy+s*0.09, cx, cy-s*0.03);
+      ctx.fill();
+      break;
+    }
+    case 'R': {
+      ctx.fillRect(cx-s*0.21, cy-s*0.09, s*0.42, s*0.35);
+      ctx.fillRect(cx-s*0.24, cy-s*0.27, s*0.12, s*0.18);
+      ctx.fillRect(cx-s*0.06, cy-s*0.27, s*0.12, s*0.18);
+      ctx.fillRect(cx+s*0.12, cy-s*0.27, s*0.12, s*0.18);
+      break;
+    }
+    case 'Q': {
+      ctx.beginPath();
+      ctx.moveTo(cx-s*0.26, cy+s*0.24);
+      ctx.lineTo(cx-s*0.20, cy-s*0.20);
+      ctx.lineTo(cx-s*0.07, cy+s*0.04);
+      ctx.lineTo(cx, cy-s*0.27);
+      ctx.lineTo(cx+s*0.07, cy+s*0.04);
+      ctx.lineTo(cx+s*0.20, cy-s*0.20);
+      ctx.lineTo(cx+s*0.26, cy+s*0.24);
+      ctx.closePath(); ctx.fill();
+      break;
+    }
+    case 'K': {
+      ctx.fillRect(cx-s*0.05, cy-s*0.30, s*0.10, s*0.22);
+      ctx.fillRect(cx-s*0.16, cy-s*0.23, s*0.32, s*0.09);
+      ctx.beginPath();
+      ctx.moveTo(cx-s*0.24, cy+s*0.26);
+      ctx.lineTo(cx-s*0.18, cy-s*0.06);
+      ctx.lineTo(cx+s*0.18, cy-s*0.06);
+      ctx.lineTo(cx+s*0.24, cy+s*0.26);
+      ctx.closePath(); ctx.fill();
+      break;
+    }
+  }
+}
+
+/* ============================================================
+   СТРІЛКИ
+   ============================================================ */
+function drawArrow(ctx, x1, y1, x2, y2, color, lw){
+  const dx = x2-x1, dy = y2-y1;
+  const len = Math.hypot(dx, dy);
+  if(len < 4) return;
+  const ux = dx/len, uy = dy/len;
+  const head = Math.min(len*0.42, lw*6);
+  const ex = x2 - ux*head*0.75;
+  const ey = y2 - uy*head*0.75;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1 + ux*lw*2.2, y1 + uy*lw*2.2);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+
+  const px = -uy, py = ux;
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(ex + px*head*0.5, ey + py*head*0.5);
+  ctx.lineTo(ex - px*head*0.5, ey - py*head*0.5);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+/* ============================================================
+   РЕНДЕР ДОШКИ
+   ============================================================ */
+function drawBoard(ctx, W, H, bi, t){
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#101014';
+  ctx.fillRect(0, 0, W, H);
+
+  const cell = Math.min(W/COLS, H/ROWS);
+  const bw = cell*COLS, bh = cell*ROWS;
+  const ox = (W - bw)/2;
+  const oy = (H - bh)/2;
+  layouts[bi] = {ox, oy, cell};
+
+  /* --- клітинки --- */
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      ctx.fillStyle = cellColor(bi, r, c, t);
+      ctx.fillRect(ox + c*cell, oy + r*cell, cell + 0.6, cell + 0.6);
+    }
+  }
+
+  /* --- рамка --- */
+  ctx.strokeStyle = 'rgba(0,0,0,.5)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(ox+1, oy+1, bw-2, bh-2);
+
+  const under = (r,c)=> cellColor(bi, r, c, t);
+
+  /* --- підсвітка вибраної клітинки --- */
+  if(G.sel){
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,.95)';
+    ctx.lineWidth = Math.max(2, cell*0.07);
+    ctx.strokeRect(ox + G.sel.c*cell + 2, oy + G.sel.r*cell + 2, cell-4, cell-4);
+    ctx.restore();
+  }
+
+  /* --- стрілки допустимих ходів --- */
+  if(G.sel && G.moves.length){
+    const col = G.turn === 'R' ? 'rgba(255,90,90,.78)' : 'rgba(110,150,255,.78)';
+    const lw = Math.max(2, cell*0.075);
+    const x1 = ox + G.sel.c*cell + cell/2;
+    const y1 = oy + G.sel.r*cell + cell/2;
+
+    for(const m of G.moves){
+      const x2 = ox + m.c*cell + cell/2;
+      const y2 = oy + m.r*cell + cell/2;
+      drawArrow(ctx, x1, y1, x2, y2, col, lw);
+    }
+
+    /* привид нової фігури на місці появи */
+    for(const m of G.moves){
+      if(!m.spawn) continue;
+      const sx = ox + m.spawn.c*cell + cell/2;
+      const sy = oy + m.spawn.r*cell + cell/2;
+      ctx.save();
+      ctx.globalAlpha = 0.42;
+      drawPieceShape(ctx, m.spawn.t, sx, sy, cell*0.95,
+                     G.turn==='R' ? 'hsl(0,72%,55%)' : 'hsl(222,72%,60%)',
+                     under(m.spawn.r, m.spawn.c), t, 0.3);
+      ctx.restore();
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      ctx.strokeStyle = 'rgba(255,255,255,.8)';
+      ctx.setLineDash([3,3]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(ox + m.spawn.c*cell + 3, oy + m.spawn.r*cell + 3, cell-6, cell-6);
+      ctx.restore();
+    }
+  }
+
+  /* --- фігури --- */
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const p = G.board[r][c];
+      if(!p) continue;
+      const cx = ox + c*cell + cell/2;
+      const cy = oy + r*cell + cell/2;
+      const seed = ((r*7 + c*13) % 10) / 10;
+      drawPieceShape(ctx, p.t, cx, cy, cell, pieceMain(p.c), under(r,c), t, seed);
+    }
+  }
+
+  /* --- кнопки ↶ ↷ --- */
+  for(const b of G.buttons){
+    const cx = ox + b.c*cell + cell/2;
+    const cy = oy + b.r*cell + cell/2;
+    const R = cell*0.34;
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, 6.2832);
+    ctx.fillStyle = b.kind === 'undo' ? 'rgba(60,110,200,.85)' : 'rgba(60,160,90,.85)';
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, cell*0.05);
+    ctx.strokeStyle = 'rgba(255,255,255,.8)';
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold ' + (cell*0.5).toFixed(0) + 'px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(b.kind === 'undo' ? '↶' : '↷', cx, cy + cell*0.02);
+    ctx.restore();
+  }
+
+  /* --- очки: прозорі 25%, мерехтливі випадкові кольори --- */
+  ctx.save();
+  ctx.globalAlpha = 0.25;
+  ctx.font = 'bold ' + Math.max(10, cell*0.42).toFixed(0) + 'px system-ui,sans-serif';
+  ctx.textBaseline = 'top';
+
+  const hueA = (t*0.13) % 360;
+  ctx.fillStyle = 'hsl(' + hueA.toFixed(0) + ',100%,55%)';
+  ctx.textAlign = 'left';
+  ctx.fillText('● ' + G.score.R.a + '  ' + G.score.R.b,
+               ox + cell*0.12, oy + cell*0.10);
+
+  const hueB = (t*0.17 + 180) % 360;
+  ctx.fillStyle = 'hsl(' + hueB.toFixed(0) + ',100%,55%)';
+  ctx.textAlign = 'right';
+  ctx.fillText(G.score.B.a + '  ' + G.score.B.b + ' ●',
+               ox + bw - cell*0.12, oy + cell*0.10);
+  ctx.restore();
+
+  /* --- чий хід --- */
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = G.turn === 'R' ? '#ff5555' : '#6699ff';
+  ctx.beginPath();
+  ctx.arc(ox + bw/2, oy + bh - cell*0.28, Math.max(3, cell*0.11), 0, 6.2832);
+  ctx.fill();
+  ctx.restore();
+
+  /* --- кінець гри --- */
+  if(G.over){
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,.62)';
+    ctx.fillRect(ox, oy + bh/2 - cell*1.1, bw, cell*2.2);
+    ctx.fillStyle = G.over === 'R' ? '#ff6666' : '#7fa8ff';
+    ctx.font = 'bold ' + Math.max(12, cell*0.62).toFixed(0) + 'px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(G.over === 'R' ? 'ПЕРЕМОГА ЧЕРВОНИХ' : 'ПЕРЕМОГА СИНІХ',
+                 ox + bw/2, oy + bh/2 - cell*0.3);
+    ctx.font = Math.max(10, cell*0.34).toFixed(0) + 'px system-ui,sans-serif';
+    ctx.fillStyle = '#ddd';
+    ctx.fillText('RED WINS / BLUE WINS', ox + bw/2, oy + bh/2 + cell*0.45);
+    ctx.restore();
+  }
+}
+
+/* ============================================================
+   ЦИКЛ МАЛЮВАННЯ
+   ============================================================ */
+function render(t){
+  if(G){
+    for(let i=0;i<boards.length;i++){
+      const b = boards[i];
+      drawBoard(b.ctx, b.w, b.h, i, t);
+    }
+  }
+  requestAnimationFrame(render);
+}
+
+/* ============================================================
+   СТВОРЕННЯ / РОЗКЛАДКА ДОШОК
+   ============================================================ */
+function makeBoard(idx){
+  const wrap = document.createElement('div');
+  wrap.className = 'wrap';
+  const cv = document.createElement('canvas');
+  wrap.appendChild(cv);
+  boardsEl.appendChild(wrap);
+
+  const ctx = cv.getContext('2d');
+  const obj = {cv, ctx, w:0, h:0, idx};
+
+  cv.addEventListener('pointerdown', function(e){
+    e.preventDefault();
+    const rect = cv.getBoundingClientRect();
+    handleClick(obj.idx, e.clientX - rect.left, e.clientY - rect.top);
+  }, {passive:false});
+
+  return obj;
+}
+
+function relayout(){
+  const minSide = Math.min(window.innerWidth, window.innerHeight);
+  const n = (minSide >= 620) ? 4 : 2;
+
+  if(boards.length !== n){
+    boardsEl.innerHTML = '';
+    boards = [];
+    layouts = [];
+    for(let i=0;i<n;i++) boards.push(makeBoard(i));
+  }
+
+  boardsEl.className = (n === 4) ? 'four' : 'two';
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  for(const b of boards){
+    const rect = b.cv.parentElement.getBoundingClientRect();
+    b.w = Math.max(1, rect.width);
+    b.h = Math.max(1, rect.height);
+    b.cv.width  = Math.round(b.w * dpr);
+    b.cv.height = Math.round(b.h * dpr);
+    b.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+}
+
+window.addEventListener('resize', relayout);
+window.addEventListener('orientationchange', ()=> setTimeout(relayout, 120));
+
+/* ============================================================
+   МЕНЮ
+   ============================================================ */
+const menuEl    = document.getElementById('menu');
+const menuBtn   = document.getElementById('menuBtn');
+const closeBtn  = document.getElementById('closeMenu');
+const fideBtn   = document.getElementById('fideBtn');
+const newGameBtn= document.getElementById('newGameBtn');
+const undoBtn2  = document.getElementById('undoBtn2');
+const redoBtn2  = document.getElementById('redoBtn2');
+
+menuBtn.addEventListener('click', ()=> menuEl.classList.remove('hidden'));
+closeBtn.addEventListener('click', ()=> menuEl.classList.add('hidden'));
+
+fideBtn.addEventListener('click', ()=>{
+  fideStyle = !fideStyle;
+  fideBtn.textContent = fideStyle ? 'Фігури: ФІДЕ / FIDE' : 'Фігури: СВОЇ / Custom';
+  fideBtn.classList.toggle('on', fideStyle);
+});
+
+newGameBtn.addEventListener('click', ()=>{ newGame(); menuEl.classList.add('hidden'); });
+undoBtn2.addEventListener('click', ()=> undo());
+redoBtn2.addEventListener('click', ()=> redo());
+
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'Escape') menuEl.classList.toggle('hidden');
+  if(e.key === 'z' && (e.ctrlKey || e.metaKey)) undo();
+  if(e.key === 'y' && (e.ctrlKey || e.metaKey)) redo();
+});
+
+/* ============================================================
+   СТАРТ
+   ============================================================ */
+newGame();
+relayout();
+requestAnimationFrame(render);
+
+})();
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+   
