@@ -1,0 +1,430 @@
+      <!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Шахи 7x7</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#171d28;color:white;font-family:Arial}
+header{text-align:center;padding:8px;background:#263244}
+h2{font-size:19px;margin:3px}
+#status{padding:5px;font-size:16px}
+main{max-width:1000px;margin:auto;padding:6px}
+.buttons{display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
+button{border:1px solid #8492a6;border-radius:7px;padding:9px;background:#39495e;color:white;font-size:14px}
+button:disabled{opacity:.4}
+.stats{display:flex;justify-content:space-around;background:#263244;margin:7px 0;padding:8px;border-radius:7px}
+.boards{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;max-width:700px;margin:auto}
+.boardbox{background:#263244;padding:4px;border-radius:7px}
+.label{text-align:center;font-size:12px;padding:3px}
+.board{display:grid;grid-template-columns:repeat(7,1fr);aspect-ratio:1;border:2px solid #888}
+.cell{border:0;border-radius:0;padding:0;position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0}
+.cell.selected{outline:3px solid yellow;outline-offset:-3px;z-index:2}
+.cell.target:after{content:"";width:23%;height:23%;border-radius:50%;background:#278b48aa;position:absolute}
+.cell.capture:after{content:"";position:absolute;inset:5%;border:3px solid red;border-radius:50%}
+.boardbox:nth-child(1) .light{background:#e9e7c9}
+.boardbox:nth-child(1) .dark{background:#c9c6a7}
+.boardbox:nth-child(2) .light{background:#e2edb9}
+.boardbox:nth-child(2) .dark{background:#b9d9ca}
+.boardbox:nth-child(3) .light{background:#f5d8b7}
+.boardbox:nth-child(3) .dark{background:#d5b99d}
+.boardbox:nth-child(4) .light{background:#ead5e8}
+.boardbox:nth-child(4) .dark{background:#cbb8dc}
+.piece{width:76%;height:76%;position:relative;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.red{color:#d51f2b}
+.blue{color:#1258cf}
+.rook:before,.rook:after{content:"";position:absolute;background:currentColor}
+.rook:before{width:23%;height:90%}
+.rook:after{width:90%;height:23%}
+.piece.bishop{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8%;align-items:stretch;justify-items:stretch}
+.bishop i{display:block;background:currentColor;min-width:0;min-height:0}
+.knight:before{content:"";position:absolute;width:78%;height:78%;border-radius:50%;background:currentColor}
+.knight:after{content:"";position:absolute;width:32%;height:32%;border-radius:50%;background:black;border:1px solid white;right:0;bottom:0}
+.pawn{background:currentColor;clip-path:polygon(50% 0,100% 100%,0 100%)}
+.king:before{content:"";position:absolute;width:80%;height:80%;background:currentColor}
+.king:after{content:"";position:absolute;width:32%;height:32%;background:black;border:1px solid white}
+.arrow{position:absolute;top:1px;left:2px;font-size:10px;color:#111}
+#log{background:#263244;padding:8px;margin-top:8px;max-height:130px;overflow:auto;font-size:12px}
+#log div{padding:3px;border-bottom:1px solid #46536a}
+.note{text-align:center;color:#bac5d4;font-size:12px;padding:7px}
+@media(max-width:420px){
+main{padding:3px}
+.boards{gap:4px}
+.boardbox{padding:2px}
+.buttons button{font-size:12px;padding:7px}
+.stats{font-size:12px}
+}
+</style>
+</head>
+<body>
+<header>
+<h2>ШАХИ 7 × 7</h2>
+<div id="status">Хід червоних ▲</div>
+</header>
+<main>
+
+<div class="buttons">
+<button id="undo">↶ Назад</button>
+<button id="redo">Вперед ↷</button>
+<button id="newBtn">Нова гра 0/11</button>
+</div>
+
+<div class="stats">
+<div>Без взяття: <b id="quiet">0</b></div>
+<div>Очки взяттів: <b id="captureScore">0</b></div>
+<div>Рахунок: <b id="totalScore">0</b></div>
+</div>
+
+<div class="boards" id="boards"></div>
+
+<div class="note">
+Натисни свою фігуру, потім клітинку для ходу.
+Усі дошки показують одну гру.
+</div>
+
+<div id="log">Історія ходів</div>
+
+</main>
+
+<script>
+"use strict";
+
+const N=7;
+const values={P:1,N:3,B:3,R:5,K:55};
+const names={P:"пішак",N:"кінь",B:"слон",R:"тура",K:"король"};
+
+let board=[];
+let turn="r";
+let selected=null;
+let legal=[];
+let history=[];
+let redoStack=[];
+let quiet=0;
+let captureScore=0;
+let totalScore=0;
+let gameOver=false;
+let newCount=0;
+let newTimer=null;
+let log=[];
+
+const $=id=>document.getElementById(id);
+
+function initial(){
+ let b=Array.from({length:N},()=>Array(N).fill(null));
+ let back=["R","N","B","K","B","N","R"];
+ for(let x=0;x<N;x++){
+  b[0][x]={c:"b",t:back[x]};
+  b[1][x]={c:"b",t:"P"};
+  b[5][x]={c:"r",t:"P"};
+  b[6][x]={c:"r",t:back[x]};
+ }
+ return b;
+}
+
+function copy(v){
+ return JSON.parse(JSON.stringify(v));
+}
+
+function snapshot(){
+ return {
+  board:copy(board),
+  turn,quiet,captureScore,totalScore,gameOver,
+  log:copy(log)
+ };
+}
+
+function restore(s){
+ board=copy(s.board);
+ turn=s.turn;
+ quiet=s.quiet;
+ captureScore=s.captureScore;
+ totalScore=s.totalScore;
+ gameOver=s.gameOver;
+ log=copy(s.log);
+ selected=null;
+ legal=[];
+ render();
+}
+
+function inside(x,y){
+ return x>=0&&x<N&&y>=0&&y<N;
+}
+
+function moves(x,y){
+ let p=board[y][x];
+ if(!p)return [];
+ let out=[];
+
+ function add(nx,ny){
+  if(!inside(nx,ny))return;
+  let q=board[ny][nx];
+  if(!q||q.c!==p.c)out.push([nx,ny]);
+ }
+
+ if(p.t==="P"){
+  let d=p.c==="r"?-1:1;
+  let ny=y+d;
+  if(inside(x,ny)&&!board[ny][x])out.push([x,ny]);
+  for(let dx of [-1,1]){
+   if(inside(x+dx,ny)){
+    let q=board[ny][x+dx];
+    if(q&&q.c!==p.c)out.push([x+dx,ny]);
+   }
+  }
+ }
+ else if(p.t==="N"){
+  let ds=[[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]];
+  for(let [dx,dy] of ds)add(x+dx,y+dy);
+ }
+ else if(p.t==="K"){
+  for(let dx=-1;dx<=1;dx++)
+   for(let dy=-1;dy<=1;dy++)
+    if(dx||dy)add(x+dx,y+dy);
+ }
+ else{
+  let dirs=p.t==="R"
+   ?[[1,0],[-1,0],[0,1],[0,-1]]
+   :[[1,1],[1,-1],[-1,1],[-1,-1]];
+  for(let [dx,dy] of dirs){
+   let nx=x+dx,ny=y+dy;
+   while(inside(nx,ny)){
+    let q=board[ny][nx];
+    if(!q){
+     out.push([nx,ny]);
+    }else{
+     if(q.c!==p.c)out.push([nx,ny]);
+     break;
+    }
+    nx+=dx;
+    ny+=dy;
+   }
+  }
+ }
+ return out;
+}
+
+function choose(x,y){
+ if(gameOver)return;
+ let p=board[y][x];
+
+ if(selected){
+  let [sx,sy]=selected;
+  if(legal.some(([a,b])=>a===x&&b===y)){
+   move(sx,sy,x,y);
+   return;
+  }
+ }
+
+ if(p&&p.c===turn){
+  selected=[x,y];
+  legal=moves(x,y);
+ }else{
+  selected=null;
+  legal=[];
+ }
+ render();
+}
+
+function move(sx,sy,dx,dy){
+ history.push(snapshot());
+ redoStack=[];
+
+ let p=board[sy][sx];
+ let target=board[dy][dx];
+ let side=p.c;
+
+ board[dy][dx]=p;
+ board[sy][sx]=null;
+
+ let promotion="";
+
+ if(p.t==="P"&&(dy===0||dy===N-1)){
+  let choice=prompt("Перетворити пішака:\nК — кінь\nС — слон\nТ — тура","К");
+  choice=(choice||"К").trim().toUpperCase();
+  if(choice==="С"||choice==="B")p.t="B";
+  else if(choice==="Т"||choice==="R")p.t="R";
+  else p.t="N";
+  promotion=" → "+names[p.t];
+ }
+
+ if(target){
+  let points=values[target.t];
+  captureScore+=side==="r"?points:-points;
+  totalScore+=side==="r"?points:-points;
+  quiet=0;
+
+  log.push(
+   (side==="r"?"Червоні":"Сині")+
+   " взяли "+names[target.t]+
+   " ("+(side==="r"?"+":"−")+points+")"
+  );
+
+  if(target.t==="K"){
+   gameOver=true;
+   let bonus=0;
+   for(let row of board)
+    for(let q of row)
+     if(q&&q.c===side)bonus+=values[q.t];
+   totalScore+=side==="r"?bonus:-bonus;
+
+   for(let yy=0;yy<N;yy++)
+    for(let xx=0;xx<N;xx++)
+     if(board[yy][xx]&&board[yy][xx].c===target.c)
+      board[yy][xx]=null;
+
+   log.push(
+    "КОРОЛЯ ВЗЯТО! ПЕРЕМОГА: "+
+    (side==="r"?"ЧЕРВОНІ":"СИНІ")+
+    ". Бонус: "+(side==="r"?"+":"−")+bonus
+   );
+  }
+ }else{
+  quiet++;
+ }
+
+ if(!gameOver)turn=turn==="r"?"b":"r";
+
+ if(!gameOver){
+  log.push(
+   (side==="r"?"Червоні":"Сині")+
+   ": "+names[p.t]+promotion+
+   " ("+(sx+1)+","+(sy+1)+") → ("+(dx+1)+","+(dy+1)+")"
+  );
+ }
+
+ selected=null;
+ legal=[];
+ render();
+}
+
+function pieceHTML(p){
+ if(!p)return "";
+ let cls={R:"rook",B:"bishop",N:"knight",P:"pawn",K:"king"}[p.t];
+ return '<div class="piece '+(p.c==="r"?"red":"blue")+' '+cls+'">'+
+  (p.t==="B"?'<i></i><i></i><i></i><i></i>':'')+
+  '</div>';
+}
+
+function render(){
+ $("status").textContent=gameOver
+  ?"Гру завершено!"
+  :(turn==="r"?"Хід червоних ▲":"Хід синіх ▼");
+
+ $("quiet").textContent=quiet;
+ $("captureScore").textContent=(captureScore>0?"+":"")+captureScore;
+ $("totalScore").textContent=(totalScore>0?"+":"")+totalScore;
+
+ let root=$("boards");
+ root.innerHTML="";
+
+ for(let k=0;k<4;k++){
+  let wrap=document.createElement("section");
+  wrap.className="boardbox";
+
+  let label=document.createElement("div");
+  label.className="label";
+  label.textContent="Дошка "+(k+1);
+  wrap.appendChild(label);
+
+  let grid=document.createElement("div");
+  grid.className="board";
+
+  for(let y=0;y<N;y++){
+   for(let x=0;x<N;x++){
+    let cell=document.createElement("button");
+    cell.className="cell "+((x+y)%2?"dark":"light");
+
+    if(selected&&selected[0]===x&&selected[1]===y)
+     cell.classList.add("selected");
+
+    if(legal.some(([a,b])=>a===x&&b===y))
+     cell.classList.add(board[y][x]?"capture":"target");
+
+    cell.innerHTML=
+     (x===0?'<span class="arrow">'+(y===6?"▲":y===0?"▼":"")+'</span>':'')+
+     pieceHTML(board[y][x]);
+
+    cell.addEventListener("click",()=>choose(x,y));
+    grid.appendChild(cell);
+   }
+  }
+
+  wrap.appendChild(grid);
+  root.appendChild(wrap);
+ }
+
+ $("log").innerHTML=log.length
+  ?log.slice(-40).map(s=>"<div>"+s.replaceAll("&","&amp;").replaceAll("<","&lt;")+"</div>").join("")
+  :"Історія ходів";
+
+ $("undo").disabled=history.length===0;
+ $("redo").disabled=redoStack.length===0;
+}
+
+$("undo").onclick=()=>{
+ if(!history.length)return;
+ redoStack.push(snapshot());
+ restore(history.pop());
+};
+
+$("redo").onclick=()=>{
+ if(!redoStack.length)return;
+ history.push(snapshot());
+ restore(redoStack.pop());
+};
+
+function newGame(){
+ board=initial();
+ turn="r";
+ selected=null;
+ legal=[];
+ history=[];
+ redoStack=[];
+ quiet=0;
+ captureScore=0;
+ totalScore=0;
+ gameOver=false;
+ log=[];
+ newCount=0;
+ clearTimeout(newTimer);
+ $("newBtn").textContent="Нова гра 0/11";
+ render();
+}
+
+$("newBtn").onclick=()=>{
+ newCount++;
+ clearTimeout(newTimer);
+
+ if(newCount>=11){
+  newGame();
+  return;
+ }
+
+ $("newBtn").textContent="Нова гра "+newCount+"/11";
+
+ newTimer=setTimeout(()=>{
+  newCount=0;
+  $("newBtn").textContent="Нова гра 0/11";
+ },5000);
+};
+
+board=initial();
+render();
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
