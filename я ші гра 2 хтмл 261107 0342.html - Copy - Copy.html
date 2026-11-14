@@ -1,0 +1,788 @@
+        <!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Більярд 100 куль</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;}
+  canvas{display:block;touch-action:none;cursor:crosshair;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* =========================================================================
+   БІЛЬЯРД 100 КУЛЬ
+   ========================================================================= */
+const cv  = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+const TAU = Math.PI * 2;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+/* ---------- геометрія екрана ---------- */
+let W = 0, H = 0, D = 0, R = 0;   // D - діаметр кулі, R - радіус
+
+/* ---------- фізичні константи ---------- */
+const TOTAL_BALLS   = 100;
+const ON_FIELD      = 50;
+const PX_PER_FORCE  = (4 / 11) * 100;   // ← ЗМІНА 1: сила ×100
+const FORCE_PER_SEC = 999 / 2;          // максимальна сила 999 триває рівно 2 секунди
+
+/* ---------- кольори куль ---------- */
+const ballHue = n => (n * 3.6 + 11) % 360;
+const ballSat = n => 62 + (n % 5) * 6;
+const ballLit = n => 40 + (n % 4) * 5;
+function numColor(c){
+  return `hsl(${(c.h + 180) % 360},${Math.min(100, 120 - c.s)}%,${c.l > 48 ? 10 : 95}%)`;
+}
+
+/* ---------- ціль (концентричні кільця) ---------- */
+const RING_MULT   = [1, 3, 5, 7];       // діаметри: D, 3D, 5D, 7D
+const RING_POINTS = [5, 3, 2, 1];       // очки
+const target = { x: 0, y: 0 };
+
+function ringPointsAt(x, y){
+  const d = Math.hypot(x - target.x, y - target.y);
+  for (let i = 0; i < 4; i++){
+    if (d <= R * RING_MULT[i]) return RING_POINTS[i];
+  }
+  return 0;
+}
+function moveTarget(){
+  const m = R * 7 + 10;
+  target.x = (W > 2 * m) ? rnd(m, W - m) : W / 2;
+  target.y = (H > 2 * m) ? rnd(m, H - m) : H / 2;
+}
+
+/* ---------- гравці ---------- */
+const players = [
+  { id:1, color:'#ff5b5b', ai:true,  think:0.5, score:0, ball:null, sx:0, sy:0, vx:0, vy:0, prevBest:null },
+  { id:2, color:'#59ff8b', ai:true,  think:1.0, score:0, ball:null, sx:0, sy:0, vx:0, vy:0, prevBest:null },
+  { id:3, color:'#5b9dff', ai:true,  think:2.0, score:0, ball:null, sx:0, sy:0, vx:0, vy:0, prevBest:null },
+  { id:4, color:'#ffd84d', ai:false, think:0,   score:0, ball:null, sx:0, sy:0, vx:0, vy:0, prevBest:null },
+  { id:5, color:'#ff6bff', ai:false, think:0,   score:0, ball:null, sx:0, sy:0, vx:0, vy:0, prevBest:null },
+  { id:6, color:'#4dffff', ai:false, think:0,   score:0, ball:null, sx:0, sy:0, vx:0, vy:0, prevBest:null },
+];
+
+/* ---------- кулі ---------- */
+const balls = [];
+
+/* ---------- стан гри ---------- */
+let phase      = 'idle';    // think | aim | fly | pause
+let timer      = 0;
+let turnIdx    = 0;
+let current    = null;
+let aimAngle   = 0;
+let powerForce = 555;
+let flights    = [];
+let flashScore = 0;
+let flashT     = 0;
+
+/* ---------- фон ---------- */
+let bg       = { h: 200, s: 60, l: 50 };
+let bgFrom   = { h: 200, s: 60, l: 50 };
+let bgTo     = { h: 200, s: 60, l: 50 };
+let bgPhase  = 'move';      // move(3с) | hold(2с)
+let bgTimer  = 0;
+let globalT  = 0;
+
+function newBgColor(){
+  return { h: rnd(0, 360), s: rnd(50, 85), l: rnd(45, 55) };
+}
+function lerpHue(a, b, t){
+  const d = ((b - a + 540) % 360) - 180;
+  return (a + d * t + 360) % 360;
+}
+
+/* =========================================================================
+   ІНІЦІАЛІЗАЦІЯ
+   ========================================================================= */
+function resize(){
+  W = cv.width  = window.innerWidth;
+  H = cv.height = window.innerHeight;
+  D = Math.min(W, H) / 21;
+  R = D / 2;
+  for (const b of balls){
+    if (b.onField){
+      b.x = clamp(b.x, R, W - R);
+      b.y = clamp(b.y, R, H - R);
+    }
+  }
+  for (const p of players){
+    p.sx = clamp(p.sx, 40, W - 40);
+    p.sy = clamp(p.sy, 30, H - 30);
+  }
+}
+
+function scatter(){
+  const field = balls.filter(b => b.onField);
+  const m = R + 2;
+  for (const b of field){
+    let ok = false;
+    for (let t = 0; t < 500; t++){
+      const x = rnd(m, Math.max(m + 1, W - m));
+      const y = rnd(m, Math.max(m + 1, H - m));
+      if (Math.hypot(x - target.x, y - target.y) < R * 7 + R) continue;
+      let free = true;
+      for (const o of field){
+        if (o === b) continue;
+        if (Math.hypot(x - o.x, y - o.y) < D * 1.05){ free = false; break; }
+      }
+      if (free){ b.x = x; b.y = y; ok = true; break; }
+    }
+    if (!ok){
+      b.x = rnd(m, Math.max(m + 1, W - m));
+      b.y = rnd(m, Math.max(m + 1, H - m));
+    }
+  }
+}
+
+function assignOwners(){
+  for (const p of players){
+    if (p.ball && p.ball.onField) continue;
+    const taken = new Set(players.map(q => q.ball).filter(Boolean));
+    const cand = balls.filter(b => b.onField && !taken.has(b));
+    if (cand.length){
+      p.ball = cand[Math.floor(Math.random() * cand.length)];
+    }
+  }
+}
+
+function refill(){
+  let need = ON_FIELD - balls.filter(b => b.onField).length;
+  const reserve = balls.filter(b => !b.onField);
+  for (let i = 0; i < need && reserve.length; i++){
+    const k = Math.floor(Math.random() * reserve.length);
+    reserve[k].onField = true;
+    reserve.splice(k, 1);
+  }
+}
+
+function init(){
+  for (let n = 1; n <= TOTAL_BALLS; n++){
+    balls.push({
+      num: n,
+      c: { h: ballHue(n), s: ballSat(n), l: ballLit(n) },
+      x: 0, y: 0, onField: false
+    });
+  }
+  const idx = [...Array(TOTAL_BALLS).keys()];
+  for (let i = idx.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  for (let i = 0; i < ON_FIELD; i++) balls[idx[i]].onField = true;
+
+  for (const p of players){
+    p.sx = rnd(60, Math.max(80, W - 60));
+    p.sy = rnd(40, Math.max(60, H - 40));
+    p.vx = rnd(-25, 25);
+    p.vy = rnd(-20, 20);
+    if (Math.abs(p.vx) < 8) p.vx = 14;
+    if (Math.abs(p.vy) < 8) p.vy = 11;
+  }
+
+  moveTarget();
+  scatter();
+  assignOwners();
+  startTurn();
+}
+
+/* =========================================================================
+   ХІД ГРИ
+   ========================================================================= */
+function startTurn(){
+  current = players[turnIdx];
+  if (!current.ball || !current.ball.onField) assignOwners();
+  if (!current.ball){
+    turnIdx = (turnIdx + 1) % players.length;
+    current = players[turnIdx];
+  }
+  if (current.ai){
+    phase = 'think';
+    timer = current.think;
+    current.preview = null;
+  } else {
+    phase = 'aim';
+    timer = 5;
+    aimAngle = Math.atan2(target.y - current.ball.y, target.x - current.ball.x);
+    powerForce = 555;
+  }
+}
+
+function shoot(angle, force){
+  flights = [];
+  flights.push({
+    ball: current.ball,
+    dx: Math.cos(angle),
+    dy: Math.sin(angle),
+    force: force,
+    depth: 0
+  });
+  phase = 'fly';
+}
+
+/* ---------- політ ---------- */
+function updateFlights(dt){
+  if (!flights.length) return;
+  const born = [];
+
+  for (let i = flights.length - 1; i >= 0; i--){
+    const f = flights[i];
+    const b = f.ball;
+    let budget = FORCE_PER_SEC * dt;
+
+    while (budget > 0.0001 && f.force > 0.5){
+      // ← ЗМІНА 2: крок збільшено з 0.4 до 4 px, щоб компенсувати ×100 силу
+      const u = Math.min(budget, f.force, 4 / PX_PER_FORCE);
+      b.x += f.dx * u * PX_PER_FORCE;
+      b.y += f.dy * u * PX_PER_FORCE;
+      f.force -= u;
+      budget -= u;
+
+      // борти — поза екраном, куля відбивається
+      if (b.x < R){ b.x = R; f.dx = Math.abs(f.dx); }
+      if (b.x > W - R){ b.x = W - R; f.dx = -Math.abs(f.dx); }
+      if (b.y < R){ b.y = R; f.dy = Math.abs(f.dy); }
+      if (b.y > H - R){ b.y = H - R; f.dy = -Math.abs(f.dy); }
+
+      // зіткнення
+      const hits = [];
+      for (const o of balls){
+        if (o === b || !o.onField) continue;
+        if (Math.hypot(o.x - b.x, o.y - b.y) < D) hits.push(o);
+      }
+      if (hits.length){
+        const k = hits.length;
+        const factor = k === 1 ? 0.666 :
+                       k === 2 ? 0.777 :
+                       k === 3 ? 0.555 : 0.444;
+        const rem  = f.force;
+        f.force    = rem * factor;
+        const give = rem * (1 - factor) / k;
+
+        for (const o of hits){
+          let nx = o.x - b.x, ny = o.y - b.y;
+          let d  = Math.hypot(nx, ny) || 1;
+          nx /= d; ny /= d;
+          o.x = b.x + nx * D * 1.01;
+          o.y = b.y + ny * D * 1.01;
+
+          if (give > 25 && f.depth < 6){
+            const already = flights.some(g => g.ball === o) ||
+                            born.some(g => g.ball === o);
+            if (!already){
+              born.push({ ball: o, dx: nx, dy: ny, force: give, depth: f.depth + 1 });
+            }
+          }
+        }
+      }
+    }
+    if (f.force <= 0.5) flights.splice(i, 1);
+  }
+  for (const g of born) flights.push(g);
+  if (flights.length > 250) flights.length = 250;
+}
+
+/* ---------- підрахунок очок ---------- */
+function doScoring(){
+  let gained = 0;
+  const taken = [];
+  for (const b of balls){
+    if (!b.onField) continue;
+    const p = ringPointsAt(b.x, b.y);
+    if (p > 0){ gained += p; taken.push(b); }
+  }
+  current.score += gained;
+  if (gained > 0){ flashScore = gained; flashT = 1.2; }
+
+  for (const b of taken){
+    b.onField = false;
+    if (b === current.ball) current.ball = null;
+  }
+  for (const p of players){
+    if (p.ball && !p.ball.onField) p.ball = null;
+  }
+}
+
+/* ---------- ШІ ---------- */
+function evalShot(ball, angle, force){
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  let px = ball.x, py = ball.y;
+  let score = 0;
+  let hitInfo = null;
+  const totalPx = force * PX_PER_FORCE;
+  let travelled = 0;
+  const stepPx = 2.5;
+
+  while (travelled < totalPx){
+    px += dx * stepPx; py += dy * stepPx; travelled += stepPx;
+    if (px < R || px > W - R || py < R || py > H - R) break;
+    const rp = ringPointsAt(px, py);
+    if (rp > score) score = rp;
+    let hit = null;
+    for (const o of balls){
+      if (o === ball || !o.onField) continue;
+      if (Math.hypot(o.x - px, o.y - py) < D){ hit = o; break; }
+    }
+    if (hit){ hitInfo = { b: hit, at: { x: px, y: py } }; break; }
+  }
+
+  if (hitInfo){
+    const hb = hitInfo.b;
+    let nx = hb.x - hitInfo.at.x, ny = hb.y - hitInfo.at.y;
+    const dd = Math.hypot(nx, ny) || 1;
+    nx /= dd; ny /= dd;
+
+    const hf = force * 0.334;
+    let hx = clamp(hb.x + nx * hf * PX_PER_FORCE, R, W - R);
+    let hy = clamp(hb.y + ny * hf * PX_PER_FORCE, R, H - R);
+    score += ringPointsAt(hx, hy);
+
+    const mf = force * 0.666;
+    let mx = clamp(hitInfo.at.x + dx * mf * PX_PER_FORCE, R, W - R);
+    let my = clamp(hitInfo.at.y + dy * mf * PX_PER_FORCE, R, H - R);
+    score += ringPointsAt(mx, my);
+  }
+
+  const dist = Math.hypot(ball.x - target.x, ball.y - target.y);
+  score -= dist / (W + H) * 0.15;
+
+  return score;
+}
+
+function aiChoose(player){
+  const ball = player.ball;
+  const base = Math.atan2(target.y - ball.y, target.x - ball.x);
+  let best = null;
+
+  for (let i = 0; i < 9; i++){
+    const a = base + rnd(-0.6, 0.6);
+    const f = rnd(666, 999);
+    const s = evalShot(ball, a, f);
+    if (!best || s > best.score) best = { angle: a, force: f, score: s };
+  }
+
+  if (player.id === 3 && player.prevBest){
+    const s = evalShot(ball, player.prevBest.angle, player.prevBest.force);
+    if (s > best.score) best = { angle: player.prevBest.angle, force: player.prevBest.force, score: s };
+  }
+  player.prevBest = { angle: best.angle, force: best.force };
+
+  best.angle += rnd(-0.00001, 0.00001);
+  return best;
+}
+
+/* =========================================================================
+   ОНОВЛЕННЯ
+   ========================================================================= */
+function update(dt){
+  globalT += dt;
+
+  /* --- фон --- */
+  bgTimer += dt;
+  if (bgPhase === 'move'){
+    const k = clamp(bgTimer / 3, 0, 1);
+    bg.h = lerpHue(bgFrom.h, bgTo.h, k);
+    bg.s = bgFrom.s + (bgTo.s - bgFrom.s) * k;
+    bg.l = bgFrom.l + (bgTo.l - bgFrom.l) * k;
+    if (k >= 1){ bgPhase = 'hold'; bgTimer = 0; }
+  } else {
+    if (bgTimer >= 2){
+      bgPhase = 'move'; bgTimer = 0;
+      bgFrom = { ...bg };
+      bgTo = newBgColor();
+    }
+  }
+
+  /* --- плаваючі очки --- */
+  for (const p of players){
+    p.sx += p.vx * dt;
+    p.sy += p.vy * dt;
+    if (p.sx < 40){ p.sx = 40; p.vx = Math.abs(p.vx); }
+    if (p.sx > W - 90){ p.sx = W - 90; p.vx = -Math.abs(p.vx); }
+    if (p.sy < 30){ p.sy = 30; p.vy = Math.abs(p.vy); }
+    if (p.sy > H - 30){ p.sy = H - 30; p.vy = -Math.abs(p.vy); }
+  }
+
+  if (flashT > 0) flashT -= dt;
+
+  /* --- політ --- */
+  if (phase === 'fly'){
+    updateFlights(dt);
+    if (flights.length === 0){
+      doScoring();
+      phase = 'pause';
+      timer = 2;
+    }
+  }
+
+  /* --- пауза --- */
+  else if (phase === 'pause'){
+    timer -= dt;
+    if (timer <= 0){
+      refill();
+      assignOwners();
+      moveTarget();
+      scatter();
+      turnIdx = (turnIdx + 1) % players.length;
+      startTurn();
+    }
+  }
+
+  /* --- думає ШІ --- */
+  else if (phase === 'think'){
+    timer -= dt;
+    if (current.id !== 3 && current.ball){
+      if (!current.preview || Math.random() < 0.25){
+        current.preview = aiChoose(current);
+      }
+    }
+    if (timer <= 0){
+      const choice = aiChoose(current);
+      aimAngle = choice.angle;
+      shoot(choice.angle, choice.force);
+    }
+  }
+
+  /* --- хід людини --- */
+  else if (phase === 'aim'){
+    timer -= dt;
+    if (timer <= 0){
+      shoot(aimAngle, powerForce);
+    }
+  }
+}
+
+/* =========================================================================
+   МАЛЮВАННЯ
+   ========================================================================= */
+function drawGlow(x, y, r, rgb, alpha){
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0,    `rgba(${rgb},${alpha})`);
+  g.addColorStop(0.35, `rgba(${rgb},${alpha * 0.35})`);
+  g.addColorStop(1,    `rgba(${rgb},0)`);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function perimeterPos(t){
+  const P = 2 * (W + H);
+  let d = ((t % 1) + 1) % 1 * P;
+  if (d < W) return { x: d, y: 0 };
+  d -= W;
+  if (d < H) return { x: W, y: d };
+  d -= H;
+  if (d < W) return { x: W - d, y: H };
+  d -= W;
+  return { x: 0, y: H - d };
+}
+
+function drawBackground(){
+  const osc = 10 * Math.sin(globalT * (TAU / 8));
+  const L = clamp(bg.l + osc, 4, 96);
+  ctx.fillStyle = `hsl(${bg.h},${bg.s}%,${L}%)`;
+  ctx.fillRect(0, 0, W, H);
+
+  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25,
+                                     W / 2, H / 2, Math.max(W, H) * 0.78);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.45)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawTarget(){
+  for (let i = 3; i >= 0; i--){
+    const r = R * RING_MULT[i];
+    ctx.beginPath();
+    ctx.arc(target.x, target.y, r, 0, TAU);
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.035)' : 'rgba(255,255,255,0.075)';
+    ctx.fill();
+  }
+  ctx.save();
+  ctx.setLineDash([10, 8]);
+  for (let i = 0; i < 4; i++){
+    const r = R * RING_MULT[i];
+    ctx.beginPath();
+    ctx.arc(target.x, target.y, r, 0, TAU);
+    ctx.strokeStyle = i === 0 ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = i === 0 ? 3 : 2;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = `bold ${Math.max(11, R * 0.55)}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  for (let i = 0; i < 4; i++){
+    const r = R * RING_MULT[i];
+    ctx.fillText('+' + RING_POINTS[i], target.x, target.y - r + Math.max(9, R * 0.45));
+  }
+  ctx.restore();
+}
+
+function drawBalls(now){
+  for (const b of balls){
+    if (!b.onField) continue;
+
+    ctx.beginPath();
+    ctx.arc(b.x + R * 0.12, b.y + R * 0.18, R, 0, TAU);
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.fill();
+
+    const g = ctx.createRadialGradient(
+      b.x - R * 0.35, b.y - R * 0.40, R * 0.06,
+      b.x, b.y, R * 1.05
+    );
+    g.addColorStop(0,    `hsl(${b.c.h},${b.c.s}%,${Math.min(96, b.c.l + 36)}%)`);
+    g.addColorStop(0.42, `hsl(${b.c.h},${b.c.s}%,${b.c.l + 6}%)`);
+    g.addColorStop(1,    `hsl(${b.c.h},${b.c.s}%,${Math.max(8, b.c.l - 28)}%)`);
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, R, 0, TAU);
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, R - 0.5, 0, TAU);
+    ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const s = String(b.num);
+    const len = s.length;
+    const fs = len === 1 ? R * 1.15 : len === 2 ? R * 0.95 : R * 0.74;
+    const fw = len === 1 ? 900 : len === 2 ? 700 : 500;
+    ctx.font = `${fw} ${fs}px Arial, Helvetica, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = numColor(b.c);
+    ctx.fillText(s, b.x, b.y + R * 0.05);
+
+    const owner = players.find(p => p.ball === b);
+    if (owner){
+      const isCur = current === owner && (phase === 'aim' || phase === 'think');
+      const pulse = isCur ? (0.5 + 0.42 * Math.sin(now * 9)) : 0.55;
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, D * 0.75 / 2, 0, TAU);
+      ctx.strokeStyle = owner.color;
+      ctx.lineWidth = Math.max(2, R * 0.20);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+}
+
+function drawAim(now){
+  if (phase !== 'aim' && phase !== 'think') return;
+  const p = current;
+  if (!p || !p.ball || !p.ball.onField) return;
+
+  let a = aimAngle, f = powerForce;
+  if (phase === 'think'){
+    if (!p.preview) return;
+    a = p.preview.angle;
+    f = p.preview.force;
+  }
+
+  const b = p.ball;
+  const len = D * 3;
+
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  ctx.beginPath();
+  ctx.moveTo(b.x, b.y);
+  ctx.lineTo(b.x + Math.cos(a) * len, b.y + Math.sin(a) * len);
+  ctx.strokeStyle = p.color;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([9, 7]);
+  ctx.lineDashOffset = -now * 40;
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.beginPath();
+  ctx.arc(b.x + Math.cos(a) * len, b.y + Math.sin(a) * len, 5, 0, TAU);
+  ctx.fillStyle = p.color;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawPowerLine(now){
+  if (phase !== 'aim') return;
+  const x  = W / 2;
+  const y0 = H * 0.10;
+  const y1 = H * 0.90;
+
+  const g = ctx.createLinearGradient(0, y0, 0, y1);
+  g.addColorStop(0,   'rgba(255,255,255,0.35)');
+  g.addColorStop(1,   'rgba(255,255,255,0.10)');
+  ctx.strokeStyle = g;
+  ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 2;
+  for (let i = 0; i <= 10; i++){
+    const yy = y0 + (y1 - y0) * i / 10;
+    ctx.beginPath(); ctx.moveTo(x - 14, yy); ctx.lineTo(x + 14, yy); ctx.stroke();
+  }
+
+  const frac = (powerForce - 111) / (999 - 111);
+  const my = y1 - frac * (y1 - y0);
+  ctx.save();
+  ctx.shadowColor = current.color;
+  ctx.shadowBlur = 18;
+  ctx.beginPath(); ctx.arc(x, my, 14, 0, TAU);
+  ctx.fillStyle = current.color;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.font = 'bold 15px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillText(Math.round(powerForce), x + 46, my + 5);
+
+  ctx.font = 'bold 26px Arial';
+  ctx.fillStyle = current.color;
+  ctx.fillText(Math.ceil(timer) + ' с', W / 2, H * 0.10 - 26);
+}
+
+function drawLights(now){
+  const pos = perimeterPos(now / 10);
+  drawGlow(pos.x, pos.y, Math.min(W, H) * 0.16, '255,250,215', 0.85);
+
+  const corners = [
+    { cx: 0, cy: 0, rgb: '255,225,77',  ph: 0.0 },
+    { cx: W, cy: 0, rgb: '77,155,255',  ph: 1.57 },
+    { cx: W, cy: H, rgb: '255,77,77',   ph: 3.14 },
+    { cx: 0, cy: H, rgb: '77,255,122',  ph: 4.71 }
+  ];
+  for (const c of corners){
+    const a  = now * 0.75 + c.ph;
+    const rr = Math.min(W, H) * 0.09;
+    drawGlow(c.cx + Math.cos(a) * rr, c.cy + Math.sin(a) * rr,
+             Math.min(W, H) * 0.12, c.rgb, 0.8);
+  }
+}
+
+function drawScores(now){
+  ctx.textBaseline = 'middle';
+  for (const p of players){
+    const isCur = (p === current) && phase !== 'pause';
+
+    ctx.save();
+    ctx.globalAlpha = isCur ? 0.9 : 0.5;
+    ctx.beginPath();
+    ctx.arc(p.sx, p.sy, D * 0.75 / 2, 0, TAU);
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = isCur ? 4 : 2.5;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = `bold ${Math.max(14, R * 0.62)}px Arial`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = p.color;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx.shadowBlur = 6;
+    ctx.fillText(`${p.id}: ${p.score}`, p.sx + D * 0.55, p.sy);
+    ctx.restore();
+
+    if (isCur){
+      ctx.save();
+      ctx.globalAlpha = 0.6 + 0.4 * Math.sin(now * 8);
+      ctx.font = `bold ${Math.max(11, R * 0.42)}px Arial`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText('●', p.sx - D * 0.55 - 12, p.sy);
+      ctx.restore();
+    }
+  }
+
+  if (flashT > 0){
+    ctx.save();
+    ctx.globalAlpha = clamp(flashT / 1.2, 0, 1);
+    ctx.font = `bold ${Math.max(28, R * 1.6)}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 14;
+    ctx.fillText('+' + flashScore, W / 2, H * 0.42 - (1.2 - flashT) * 60);
+    ctx.restore();
+  }
+}
+
+function draw(){
+  const now = globalT;
+  drawBackground();
+  drawTarget();
+  drawBalls(now);
+  drawAim(now);
+  drawPowerLine(now);
+  drawLights(now);
+  drawScores(now);
+}
+
+/* =========================================================================
+   ВВІД
+   ========================================================================= */
+let dragging = false;
+
+function handlePointer(x, y){
+  if (phase !== 'aim' || !current || !current.ball) return;
+
+  if (Math.abs(x - W / 2) < Math.min(90, W * 0.12)){
+    const f = (H * 0.9 - y) / (H * 0.8);
+    powerForce = 111 + clamp(f, 0, 1) * (999 - 111);
+  } else {
+    const b = current.ball;
+    aimAngle = Math.atan2(y - b.y, x - b.x);
+  }
+}
+
+cv.addEventListener('pointerdown', e => {
+  dragging = true;
+  handlePointer(e.clientX, e.clientY);
+});
+cv.addEventListener('pointermove', e => {
+  if (dragging) handlePointer(e.clientX, e.clientY);
+});
+cv.addEventListener('pointerup',     () => { dragging = false; });
+cv.addEventListener('pointercancel', () => { dragging = false; });
+
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' && phase === 'aim'){
+    e.preventDefault();
+    shoot(aimAngle, powerForce);
+  }
+});
+
+/* =========================================================================
+   ГОЛОВНИЙ ЦИКЛ
+   ========================================================================= */
+let lastT = performance.now();
+function loop(t){
+  const dt = Math.min(0.05, (t - lastT) / 1000);
+  lastT = t;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- СТАРТ ---------- */
+resize();
+window.addEventListener('resize', resize);
+init();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>     
