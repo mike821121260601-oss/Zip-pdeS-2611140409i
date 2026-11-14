@@ -1,0 +1,205 @@
+          <!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>55x55 Line Area Game</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <style>
+    body { margin: 0; background: #111; overflow: hidden; }
+    canvas { display: block; margin: 0 auto; }
+  </style>
+</head>
+<body>
+<script>
+let cols = 55;
+let rows = 55;
+let grid = [];
+let cellSize;
+let currentPlayer = 1; // 1 = red, 2 = blue
+let scores = [0, 0, 0]; // index 1 and 2
+let floatingTexts = [];
+let lastMove = null;
+let aiRandomMoves = 0; // скільки випадкових ходів робити (0 = вимкнено)
+let gameMode = "player"; // "player" або "ai"
+
+function setup() {
+  let size = min(windowWidth, windowHeight) - 20;
+  cellSize = size / cols;
+  createCanvas(cols * cellSize, rows * cellSize);
+  
+  // Ініціалізація поля
+  for (let y = 0; y < rows; y++) {
+    grid[y] = [];
+    for (let x = 0; x < cols; x++) {
+      grid[y][x] = 0;
+    }
+  }
+  
+  textAlign(CENTER, CENTER);
+}
+
+function draw() {
+  background(30);
+  
+  // Малюємо поле
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      // фон клітинки (жовтий / світло-сірий)
+      if ((x + y) % 2 === 0) fill(255, 220, 100);
+      else fill(180, 180, 190);
+      stroke(60);
+      strokeWeight(0.5);
+      rect(x * cellSize, y * cellSize, cellSize, cellSize);
+      
+      // фігури
+      if (grid[y][x] === 1) {
+        fill(220, 40, 40);
+        noStroke();
+        ellipse(x * cellSize + cellSize/2, y * cellSize + cellSize/2, cellSize * 0.7);
+      } else if (grid[y][x] === 2) {
+        fill(40, 100, 220);
+        noStroke();
+        ellipse(x * cellSize + cellSize/2, y * cellSize + cellSize/2, cellSize * 0.7);
+      }
+    }
+  }
+  
+  // Плаваючі тексти
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    let t = floatingTexts[i];
+    fill(t.col);
+    noStroke();
+    textSize(18);
+    text(t.txt, t.x, t.y);
+    t.y -= 1.2;
+    t.life--;
+    if (t.life <= 0) floatingTexts.splice(i, 1);
+  }
+  
+  // Інфо
+  fill(255);
+  textSize(14);
+  textAlign(LEFT, TOP);
+  text(`Хід: ${currentPlayer === 1 ? "ЧЕРВОНИЙ" : "СИНІЙ"}   |   Рахунок: Ч ${scores[1]}  С ${scores[2]}`, 8, 8);
+  text(`AI випадкових ходів: ${aiRandomMoves} (клавіші 1-9, 0=вимк)`, 8, 26);
+}
+
+function mousePressed() {
+  if (gameMode === "ai" && currentPlayer === 2) return;
+  
+  let x = floor(mouseX / cellSize);
+  let y = floor(mouseY / cellSize);
+  
+  if (x >= 0 && x < cols && y >= 0 && y < rows && grid[y][x] === 0) {
+    placePiece(x, y, currentPlayer);
+    
+    // Якщо увімкнено випадкові ходи — робимо їх
+    if (aiRandomMoves > 0) {
+      for (let i = 0; i < aiRandomMoves; i++) {
+        doRandomMove(currentPlayer === 1 ? 2 : 1);
+      }
+    }
+  }
+}
+
+function placePiece(x, y, player) {
+  grid[y][x] = player;
+  lastMove = {x, y, player};
+  
+  let gained = evaluateMove(x, y, player);
+  
+  if (player === 1) scores[1] += gained;
+  else scores[2] += gained;
+  
+  // плаваючий текст
+  floatingTexts.push({
+    x: x * cellSize + cellSize/2,
+    y: y * cellSize + cellSize/2,
+    txt: (gained >= 0 ? "+" : "") + gained,
+    col: player === 1 ? color(255, 80, 80) : color(80, 140, 255),
+    life: 90
+  });
+  
+  currentPlayer = currentPlayer === 1 ? 2 : 1;
+}
+
+function doRandomMove(player) {
+  let empty = [];
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      if (grid[y][x] === 0) empty.push({x, y});
+    }
+  }
+  if (empty.length === 0) return;
+  let pick = random(empty);
+  placePiece(pick.x, pick.y, player);
+}
+
+// ===== ОЦІНКА ХОДУ =====
+function evaluateMove(x, y, player) {
+  let total = 0;
+  
+  // 8 звичайних напрямків (горизонт, вертикаль, діагоналі)
+  let dirs = [
+    [1,0], [-1,0], [0,1], [0,-1],
+    [1,1], [1,-1], [-1,1], [-1,-1]
+  ];
+  
+  for (let [dx, dy] of dirs) {
+    let count = 1 + countDirection(x, y, dx, dy, player) + countDirection(x, y, -dx, -dy, player);
+    if (count >= 4) {
+      total += count * count; // n²
+    }
+  }
+  
+  // Простий підрахунок прямокутників (поки тільки по горизонталі/вертикалі)
+  total += evaluateRectangles(x, y, player);
+  
+  return player === 1 ? total : -total; // сині віднімають
+}
+
+function countDirection(x, y, dx, dy, player) {
+  let cnt = 0;
+  let cx = x + dx;
+  let cy = y + dy;
+  while (cx >= 0 && cx < cols && cy >= 0 && cy < rows) {
+    if (grid[cy][cx] === player) cnt++;
+    else if (grid[cy][cx] === 0) {
+      // дозволяємо одну порожню? (можна змінити логіку)
+      // поки пропускаємо тільки свої
+      break;
+    } else break; // чужа фігура
+    cx += dx;
+    cy += dy;
+  }
+  return cnt;
+}
+
+function evaluateRectangles(x, y, player) {
+  // Дуже спрощена версія: шукаємо невеликі прямокутники, де кути свої
+  let points = 0;
+  // Поки що заглушка — можна розвивати
+  return points;
+}
+
+// Клавіші для налаштування
+function keyPressed() {
+  if (key >= '0' && key <= '9') {
+    aiRandomMoves = int(key);
+  }
+  if (key === 'r' || key === 'R') {
+    // рестарт
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        grid[y][x] = 0;
+      }
+    }
+    scores = [0, 0, 0];
+    currentPlayer = 1;
+    floatingTexts = [];
+  }
+}
+</script>
+</body>
+</html>  
