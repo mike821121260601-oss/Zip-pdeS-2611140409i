@@ -1,0 +1,844 @@
+     #include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+// Макроси або константи для генерації даних
+#define TOTAL_ITEMS 9
+#define DATA_VAL 999
+
+// Допоміжна функція для малювання еліпса (контуру), оскільки в SDL3 немає SDL_RenderEllipse
+void DrawEllipse(SDL_Renderer* renderer, float cx, float cy, float rx, float ry, int segments = 60) {
+    float theta = 0.0f;
+    float delta = 2.0f * M_PI / segments;
+    
+    float old_x = cx + rx;
+    float old_y = cy;
+    
+    for (int i = 1; i <= segments; i++) {
+        theta += delta;
+        float new_x = cx + rx * cosf(theta);
+        float new_y = cy + ry * sinf(theta);
+        SDL_RenderLine(renderer, old_x, old_y, new_x, new_y);
+        old_x = new_x;
+        old_y = new_y;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    // 1. Підключення та ініціалізація SDL3
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::cerr << "Помилка ініціалізації SDL: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+
+    // Створення вікна та рендерера в SDL3 (розмір 800х600)
+    if (!SDL_CreateWindowAndRenderer("SDL3 Прості Примітиви & Дані", 800, 600, 0, &window, &renderer)) {
+        std::cerr << "Помилка створення вікна/рендерера: " << SDL_GetError() << std::endl;
+        SDL_Quit();
+        return -1;
+    }
+
+    // 2. Робота з даними: генеруємо 9 штук пар чисел (999.0f), конвертуючи все в float
+    // Оскільки 999 завелике для координат екрану 800х600, ми використаємо їх з масштабуванням/зміщенням.
+    struct DataPoint {
+        float x;
+        float y;
+    };
+    
+    std::vector<DataPoint> data(TOTAL_ITEMS);
+    for (int i = 0; i < TOTAL_ITEMS; ++i) {
+        // Рандомізуємо: чергуємо цілі (без точки) та дробові (з точкою), 
+        // але автоматично зберігаємо як float (з точкою)
+        if (i % 2 == 0) {
+            data[i].x = (float)DATA_VAL; // без точки спочатку -> конвертовано в float
+            data[i].y = (float)DATA_VAL;
+        } else {
+            data[i].x = 999.99f;          // з точкою
+            data[i].y = 999.99f;
+        }
+    }
+
+    // Головний цикл програми
+    bool is_running = true;
+    SDL_Event event;
+
+    while (is_running) {
+        // Обробка подій
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                is_running = false;
+            }
+        }
+
+        // Очищення екрану (чорний колір)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderClear(renderer);
+
+        // --- ВІЗУАЛІЗАЦІЯ ПРИМІТИВІВ (SDL3 використовує координати типу float) ---
+
+        // 1. Малюємо ТОЧКУ (Червона)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderPoint(renderer, 100.0f, 100.0f); 
+
+        // 2. Малюємо ШВИДКУ ЛІНІЮ (Зелена)
+        SDL_SetRenderDrawColor(renderer, 0, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderLine(renderer, 50.0f, 150.0f, 250.0f, 150.0f);
+
+        // 3. Малюємо ПРЯМОКУТНИК (Синій, не заповнений)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, SDL_ALPHA_OPAQUE);
+        SDL_FRect rect = { 300.0f, 80.0f, 150.0f, 100.0f }; // SDL3 використовує SDL_FRect замість SDL_Rect
+        SDL_RenderRect(renderer, &rect);
+
+        // 4. Малюємо ТРИКУТНИК (Жовтий, за допомогою геометрії SDL3)
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_Vertex vertices[3];
+        // Вершина 1
+        vertices[0].position.x = 550.0f; vertices[0].position.y = 180.0f;
+        vertices[0].color = { 1.0f, 1.0f, 0.0f, 1.0f }; // колір вершини (RGBA від 0.0 до 1.0)
+        // Вершина 2
+        vertices[1].position.x = 500.0f; vertices[1].position.y = 80.0f;
+        vertices[1].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        // Вершина 3
+        vertices[2].position.x = 600.0f; vertices[2].position.y = 80.0f;
+        vertices[2].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        
+        // Малюємо контур трикутника за допомогою індексів (або SDL_RenderGeometry)
+        int indices[3] = { 0, 1, 2 };
+        SDL_RenderGeometryRaw(renderer, nullptr, 
+                              &vertices[0].position, sizeof(SDL_Vertex), 
+                              &vertices[0].color, sizeof(SDL_Vertex), 
+                              nullptr, 0, 
+                              3, indices, 3, sizeof(int));
+
+        // 5. Малюємо ЕЛІПС (Пурпурний, математичний розрахунок на базі ліній)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 255, SDL_ALPHA_OPAQUE);
+        // Використовуємо згенеровані раніше дані (data[0].x = 999.0f) 
+        // для розрахунку центру та радіусів еліпса, щоб вони вписалися в екран
+        float cx = data[0].x - 599.0f;  // 999 - 599 = 400 (центр X)
+        float cy = data[0].y - 599.0f;  // 999 - 599 = 400 (центр Y)
+        float rx = 120.0f;              // радіус по X
+        float ry = 70.0f;               // радіус по Y
+        DrawEllipse(renderer, cx, cy, rx, ry);
+
+        // Відображення намальованого кадру на екрані
+        SDL_RenderPresent(renderer);
+        
+        // Невелика затримка для зменшення навантаження на CPU (~60 FPS)
+        SDL_Delay(16);
+    }
+
+    // Очищення ресурсів при виході
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+// Макроси або константи для генерації даних
+#define TOTAL_ITEMS 9
+#define DATA_VAL 999
+
+// Допоміжна функція для малювання еліпса (контуру), оскільки в SDL3 немає SDL_RenderEllipse
+void DrawEllipse(SDL_Renderer* renderer, float cx, float cy, float rx, float ry, int segments = 60) {
+    float theta = 0.0f;
+    float delta = 2.0f * M_PI / segments;
+    
+    float old_x = cx + rx;
+    float old_y = cy;
+    
+    for (int i = 1; i <= segments; i++) {
+        theta += delta;
+        float new_x = cx + rx * cosf(theta);
+        float new_y = cy + ry * sinf(theta);
+        SDL_RenderLine(renderer, old_x, old_y, new_x, new_y);
+        old_x = new_x;
+        old_y = new_y;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    // 1. Підключення та ініціалізація SDL3
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::cerr << "Помилка ініціалізації SDL: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+
+    // Створення вікна та рендерера в SDL3 (розмір 800х600)
+    if (!SDL_CreateWindowAndRenderer("SDL3 Прості Примітиви & Дані", 800, 600, 0, &window, &renderer)) {
+        std::cerr << "Помилка створення вікна/рендерера: " << SDL_GetError() << std::endl;
+        SDL_Quit();
+        return -1;
+    }
+
+    // 2. Робота з даними: генеруємо 9 штук пар чисел (999.0f), конвертуючи все в float
+    // Оскільки 999 завелике для координат екрану 800х600, ми використаємо їх з масштабуванням/зміщенням.
+    struct DataPoint {
+        float x;
+        float y;
+    };
+    
+    std::vector<DataPoint> data(TOTAL_ITEMS);
+    for (int i = 0; i < TOTAL_ITEMS; ++i) {
+        // Рандомізуємо: чергуємо цілі (без точки) та дробові (з точкою), 
+        // але автоматично зберігаємо як float (з точкою)
+        if (i % 2 == 0) {
+            data[i].x = (float)DATA_VAL; // без точки спочатку -> конвертовано в float
+            data[i].y = (float)DATA_VAL;
+        } else {
+            data[i].x = 999.99f;          // з точкою
+            data[i].y = 999.99f;
+        }
+    }
+
+    // Головний цикл програми
+    bool is_running = true;
+    SDL_Event event;
+
+    while (is_running) {
+        // Обробка подій
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                is_running = false;
+            }
+        }
+
+        // Очищення екрану (чорний колір)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderClear(renderer);
+
+        // --- ВІЗУАЛІЗАЦІЯ ПРИМІТИВІВ (SDL3 використовує координати типу float) ---
+
+        // 1. Малюємо ТОЧКУ (Червона)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderPoint(renderer, 100.0f, 100.0f); 
+
+        // 2. Малюємо ШВИДКУ ЛІНІЮ (Зелена)
+        SDL_SetRenderDrawColor(renderer, 0, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderLine(renderer, 50.0f, 150.0f, 250.0f, 150.0f);
+
+        // 3. Малюємо ПРЯМОКУТНИК (Синій, не заповнений)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, SDL_ALPHA_OPAQUE);
+        SDL_FRect rect = { 300.0f, 80.0f, 150.0f, 100.0f }; // SDL3 використовує SDL_FRect замість SDL_Rect
+        SDL_RenderRect(renderer, &rect);
+
+        // 4. Малюємо ТРИКУТНИК (Жовтий, за допомогою геометрії SDL3)
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_Vertex vertices[3];
+        // Вершина 1
+        vertices[0].position.x = 550.0f; vertices[0].position.y = 180.0f;
+        vertices[0].color = { 1.0f, 1.0f, 0.0f, 1.0f }; // колір вершини (RGBA від 0.0 до 1.0)
+        // Вершина 2
+        vertices[1].position.x = 500.0f; vertices[1].position.y = 80.0f;
+        vertices[1].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        // Вершина 3
+        vertices[2].position.x = 600.0f; vertices[2].position.y = 80.0f;
+        vertices[2].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        
+        // Малюємо контур трикутника за допомогою індексів (або SDL_RenderGeometry)
+        int indices[3] = { 0, 1, 2 };
+        SDL_RenderGeometryRaw(renderer, nullptr, 
+                              &vertices[0].position, sizeof(SDL_Vertex), 
+                              &vertices[0].color, sizeof(SDL_Vertex), 
+                              nullptr, 0, 
+                              3, indices, 3, sizeof(int));
+
+        // 5. Малюємо ЕЛІПС (Пурпурний, математичний розрахунок на базі ліній)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 255, SDL_ALPHA_OPAQUE);
+        // Використовуємо згенеровані раніше дані (data[0].x = 999.0f) 
+        // для розрахунку центру та радіусів еліпса, щоб вони вписалися в екран
+        float cx = data[0].x - 599.0f;  // 999 - 599 = 400 (центр X)
+        float cy = data[0].y - 599.0f;  // 999 - 599 = 400 (центр Y)
+        float rx = 120.0f;              // радіус по X
+        float ry = 70.0f;               // радіус по Y
+        DrawEllipse(renderer, cx, cy, rx, ry);
+
+        // Відображення намальованого кадру на екрані
+        SDL_RenderPresent(renderer);
+        
+        // Невелика затримка для зменшення навантаження на CPU (~60 FPS)
+        SDL_Delay(16);
+    }
+
+    // Очищення ресурсів при виході
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+// Макроси або константи для генерації даних
+#define TOTAL_ITEMS 9
+#define DATA_VAL 999
+
+// Допоміжна функція для малювання еліпса (контуру), оскільки в SDL3 немає SDL_RenderEllipse
+void DrawEllipse(SDL_Renderer* renderer, float cx, float cy, float rx, float ry, int segments = 60) {
+    float theta = 0.0f;
+    float delta = 2.0f * M_PI / segments;
+    
+    float old_x = cx + rx;
+    float old_y = cy;
+    
+    for (int i = 1; i <= segments; i++) {
+        theta += delta;
+        float new_x = cx + rx * cosf(theta);
+        float new_y = cy + ry * sinf(theta);
+        SDL_RenderLine(renderer, old_x, old_y, new_x, new_y);
+        old_x = new_x;
+        old_y = new_y;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    // 1. Підключення та ініціалізація SDL3
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::cerr << "Помилка ініціалізації SDL: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+
+    // Створення вікна та рендерера в SDL3 (розмір 800х600)
+    if (!SDL_CreateWindowAndRenderer("SDL3 Прості Примітиви & Дані", 800, 600, 0, &window, &renderer)) {
+        std::cerr << "Помилка створення вікна/рендерера: " << SDL_GetError() << std::endl;
+        SDL_Quit();
+        return -1;
+    }
+
+    // 2. Робота з даними: генеруємо 9 штук пар чисел (999.0f), конвертуючи все в float
+    // Оскільки 999 завелике для координат екрану 800х600, ми використаємо їх з масштабуванням/зміщенням.
+    struct DataPoint {
+        float x;
+        float y;
+    };
+    
+    std::vector<DataPoint> data(TOTAL_ITEMS);
+    for (int i = 0; i < TOTAL_ITEMS; ++i) {
+        // Рандомізуємо: чергуємо цілі (без точки) та дробові (з точкою), 
+        // але автоматично зберігаємо як float (з точкою)
+        if (i % 2 == 0) {
+            data[i].x = (float)DATA_VAL; // без точки спочатку -> конвертовано в float
+            data[i].y = (float)DATA_VAL;
+        } else {
+            data[i].x = 999.99f;          // з точкою
+            data[i].y = 999.99f;
+        }
+    }
+
+    // Головний цикл програми
+    bool is_running = true;
+    SDL_Event event;
+
+    while (is_running) {
+        // Обробка подій
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                is_running = false;
+            }
+        }
+
+        // Очищення екрану (чорний колір)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderClear(renderer);
+
+        // --- ВІЗУАЛІЗАЦІЯ ПРИМІТИВІВ (SDL3 використовує координати типу float) ---
+
+        // 1. Малюємо ТОЧКУ (Червона)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderPoint(renderer, 100.0f, 100.0f); 
+
+        // 2. Малюємо ШВИДКУ ЛІНІЮ (Зелена)
+        SDL_SetRenderDrawColor(renderer, 0, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderLine(renderer, 50.0f, 150.0f, 250.0f, 150.0f);
+
+        // 3. Малюємо ПРЯМОКУТНИК (Синій, не заповнений)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, SDL_ALPHA_OPAQUE);
+        SDL_FRect rect = { 300.0f, 80.0f, 150.0f, 100.0f }; // SDL3 використовує SDL_FRect замість SDL_Rect
+        SDL_RenderRect(renderer, &rect);
+
+        // 4. Малюємо ТРИКУТНИК (Жовтий, за допомогою геометрії SDL3)
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_Vertex vertices[3];
+        // Вершина 1
+        vertices[0].position.x = 550.0f; vertices[0].position.y = 180.0f;
+        vertices[0].color = { 1.0f, 1.0f, 0.0f, 1.0f }; // колір вершини (RGBA від 0.0 до 1.0)
+        // Вершина 2
+        vertices[1].position.x = 500.0f; vertices[1].position.y = 80.0f;
+        vertices[1].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        // Вершина 3
+        vertices[2].position.x = 600.0f; vertices[2].position.y = 80.0f;
+        vertices[2].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        
+        // Малюємо контур трикутника за допомогою індексів (або SDL_RenderGeometry)
+        int indices[3] = { 0, 1, 2 };
+        SDL_RenderGeometryRaw(renderer, nullptr, 
+                              &vertices[0].position, sizeof(SDL_Vertex), 
+                              &vertices[0].color, sizeof(SDL_Vertex), 
+                              nullptr, 0, 
+                              3, indices, 3, sizeof(int));
+
+        // 5. Малюємо ЕЛІПС (Пурпурний, математичний розрахунок на базі ліній)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 255, SDL_ALPHA_OPAQUE);
+        // Використовуємо згенеровані раніше дані (data[0].x = 999.0f) 
+        // для розрахунку центру та радіусів еліпса, щоб вони вписалися в екран
+        float cx = data[0].x - 599.0f;  // 999 - 599 = 400 (центр X)
+        float cy = data[0].y - 599.0f;  // 999 - 599 = 400 (центр Y)
+        float rx = 120.0f;              // радіус по X
+        float ry = 70.0f;               // радіус по Y
+        DrawEllipse(renderer, cx, cy, rx, ry);
+
+        // Відображення намальованого кадру на екрані
+        SDL_RenderPresent(renderer);
+        
+        // Невелика затримка для зменшення навантаження на CPU (~60 FPS)
+        SDL_Delay(16);
+    }
+
+    // Очищення ресурсів при виході
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+// Макроси або константи для генерації даних
+#define TOTAL_ITEMS 9
+#define DATA_VAL 999
+
+// Допоміжна функція для малювання еліпса (контуру), оскільки в SDL3 немає SDL_RenderEllipse
+void DrawEllipse(SDL_Renderer* renderer, float cx, float cy, float rx, float ry, int segments = 60) {
+    float theta = 0.0f;
+    float delta = 2.0f * M_PI / segments;
+    
+    float old_x = cx + rx;
+    float old_y = cy;
+    
+    for (int i = 1; i <= segments; i++) {
+        theta += delta;
+        float new_x = cx + rx * cosf(theta);
+        float new_y = cy + ry * sinf(theta);
+        SDL_RenderLine(renderer, old_x, old_y, new_x, new_y);
+        old_x = new_x;
+        old_y = new_y;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    // 1. Підключення та ініціалізація SDL3
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::cerr << "Помилка ініціалізації SDL: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+
+    // Створення вікна та рендерера в SDL3 (розмір 800х600)
+    if (!SDL_CreateWindowAndRenderer("SDL3 Прості Примітиви & Дані", 800, 600, 0, &window, &renderer)) {
+        std::cerr << "Помилка створення вікна/рендерера: " << SDL_GetError() << std::endl;
+        SDL_Quit();
+        return -1;
+    }
+
+    // 2. Робота з даними: генеруємо 9 штук пар чисел (999.0f), конвертуючи все в float
+    // Оскільки 999 завелике для координат екрану 800х600, ми використаємо їх з масштабуванням/зміщенням.
+    struct DataPoint {
+        float x;
+        float y;
+    };
+    
+    std::vector<DataPoint> data(TOTAL_ITEMS);
+    for (int i = 0; i < TOTAL_ITEMS; ++i) {
+        // Рандомізуємо: чергуємо цілі (без точки) та дробові (з точкою), 
+        // але автоматично зберігаємо як float (з точкою)
+        if (i % 2 == 0) {
+            data[i].x = (float)DATA_VAL; // без точки спочатку -> конвертовано в float
+            data[i].y = (float)DATA_VAL;
+        } else {
+            data[i].x = 999.99f;          // з точкою
+            data[i].y = 999.99f;
+        }
+    }
+
+    // Головний цикл програми
+    bool is_running = true;
+    SDL_Event event;
+
+    while (is_running) {
+        // Обробка подій
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                is_running = false;
+            }
+        }
+
+        // Очищення екрану (чорний колір)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderClear(renderer);
+
+        // --- ВІЗУАЛІЗАЦІЯ ПРИМІТИВІВ (SDL3 використовує координати типу float) ---
+
+        // 1. Малюємо ТОЧКУ (Червона)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderPoint(renderer, 100.0f, 100.0f); 
+
+        // 2. Малюємо ШВИДКУ ЛІНІЮ (Зелена)
+        SDL_SetRenderDrawColor(renderer, 0, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderLine(renderer, 50.0f, 150.0f, 250.0f, 150.0f);
+
+        // 3. Малюємо ПРЯМОКУТНИК (Синій, не заповнений)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, SDL_ALPHA_OPAQUE);
+        SDL_FRect rect = { 300.0f, 80.0f, 150.0f, 100.0f }; // SDL3 використовує SDL_FRect замість SDL_Rect
+        SDL_RenderRect(renderer, &rect);
+
+        // 4. Малюємо ТРИКУТНИК (Жовтий, за допомогою геометрії SDL3)
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_Vertex vertices[3];
+        // Вершина 1
+        vertices[0].position.x = 550.0f; vertices[0].position.y = 180.0f;
+        vertices[0].color = { 1.0f, 1.0f, 0.0f, 1.0f }; // колір вершини (RGBA від 0.0 до 1.0)
+        // Вершина 2
+        vertices[1].position.x = 500.0f; vertices[1].position.y = 80.0f;
+        vertices[1].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        // Вершина 3
+        vertices[2].position.x = 600.0f; vertices[2].position.y = 80.0f;
+        vertices[2].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        
+        // Малюємо контур трикутника за допомогою індексів (або SDL_RenderGeometry)
+        int indices[3] = { 0, 1, 2 };
+        SDL_RenderGeometryRaw(renderer, nullptr, 
+                              &vertices[0].position, sizeof(SDL_Vertex), 
+                              &vertices[0].color, sizeof(SDL_Vertex), 
+                              nullptr, 0, 
+                              3, indices, 3, sizeof(int));
+
+        // 5. Малюємо ЕЛІПС (Пурпурний, математичний розрахунок на базі ліній)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 255, SDL_ALPHA_OPAQUE);
+        // Використовуємо згенеровані раніше дані (data[0].x = 999.0f) 
+        // для розрахунку центру та радіусів еліпса, щоб вони вписалися в екран
+        float cx = data[0].x - 599.0f;  // 999 - 599 = 400 (центр X)
+        float cy = data[0].y - 599.0f;  // 999 - 599 = 400 (центр Y)
+        float rx = 120.0f;              // радіус по X
+        float ry = 70.0f;               // радіус по Y
+        DrawEllipse(renderer, cx, cy, rx, ry);
+
+        // Відображення намальованого кадру на екрані
+        SDL_RenderPresent(renderer);
+        
+        // Невелика затримка для зменшення навантаження на CPU (~60 FPS)
+        SDL_Delay(16);
+    }
+
+    // Очищення ресурсів при виході
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+// Макроси або константи для генерації даних
+#define TOTAL_ITEMS 9
+#define DATA_VAL 999
+
+// Допоміжна функція для малювання еліпса (контуру), оскільки в SDL3 немає SDL_RenderEllipse
+void DrawEllipse(SDL_Renderer* renderer, float cx, float cy, float rx, float ry, int segments = 60) {
+    float theta = 0.0f;
+    float delta = 2.0f * M_PI / segments;
+    
+    float old_x = cx + rx;
+    float old_y = cy;
+    
+    for (int i = 1; i <= segments; i++) {
+        theta += delta;
+        float new_x = cx + rx * cosf(theta);
+        float new_y = cy + ry * sinf(theta);
+        SDL_RenderLine(renderer, old_x, old_y, new_x, new_y);
+        old_x = new_x;
+        old_y = new_y;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    // 1. Підключення та ініціалізація SDL3
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::cerr << "Помилка ініціалізації SDL: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+
+    // Створення вікна та рендерера в SDL3 (розмір 800х600)
+    if (!SDL_CreateWindowAndRenderer("SDL3 Прості Примітиви & Дані", 800, 600, 0, &window, &renderer)) {
+        std::cerr << "Помилка створення вікна/рендерера: " << SDL_GetError() << std::endl;
+        SDL_Quit();
+        return -1;
+    }
+
+    // 2. Робота з даними: генеруємо 9 штук пар чисел (999.0f), конвертуючи все в float
+    // Оскільки 999 завелике для координат екрану 800х600, ми використаємо їх з масштабуванням/зміщенням.
+    struct DataPoint {
+        float x;
+        float y;
+    };
+    
+    std::vector<DataPoint> data(TOTAL_ITEMS);
+    for (int i = 0; i < TOTAL_ITEMS; ++i) {
+        // Рандомізуємо: чергуємо цілі (без точки) та дробові (з точкою), 
+        // але автоматично зберігаємо як float (з точкою)
+        if (i % 2 == 0) {
+            data[i].x = (float)DATA_VAL; // без точки спочатку -> конвертовано в float
+            data[i].y = (float)DATA_VAL;
+        } else {
+            data[i].x = 999.99f;          // з точкою
+            data[i].y = 999.99f;
+        }
+    }
+
+    // Головний цикл програми
+    bool is_running = true;
+    SDL_Event event;
+
+    while (is_running) {
+        // Обробка подій
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                is_running = false;
+            }
+        }
+
+        // Очищення екрану (чорний колір)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderClear(renderer);
+
+        // --- ВІЗУАЛІЗАЦІЯ ПРИМІТИВІВ (SDL3 використовує координати типу float) ---
+
+        // 1. Малюємо ТОЧКУ (Червона)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderPoint(renderer, 100.0f, 100.0f); 
+
+        // 2. Малюємо ШВИДКУ ЛІНІЮ (Зелена)
+        SDL_SetRenderDrawColor(renderer, 0, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_RenderLine(renderer, 50.0f, 150.0f, 250.0f, 150.0f);
+
+        // 3. Малюємо ПРЯМОКУТНИК (Синій, не заповнений)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, SDL_ALPHA_OPAQUE);
+        SDL_FRect rect = { 300.0f, 80.0f, 150.0f, 100.0f }; // SDL3 використовує SDL_FRect замість SDL_Rect
+        SDL_RenderRect(renderer, &rect);
+
+        // 4. Малюємо ТРИКУТНИК (Жовтий, за допомогою геометрії SDL3)
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, SDL_ALPHA_OPAQUE);
+        SDL_Vertex vertices[3];
+        // Вершина 1
+        vertices[0].position.x = 550.0f; vertices[0].position.y = 180.0f;
+        vertices[0].color = { 1.0f, 1.0f, 0.0f, 1.0f }; // колір вершини (RGBA від 0.0 до 1.0)
+        // Вершина 2
+        vertices[1].position.x = 500.0f; vertices[1].position.y = 80.0f;
+        vertices[1].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        // Вершина 3
+        vertices[2].position.x = 600.0f; vertices[2].position.y = 80.0f;
+        vertices[2].color = { 1.0f, 1.0f, 0.0f, 1.0f };
+        
+        // Малюємо контур трикутника за допомогою індексів (або SDL_RenderGeometry)
+        int indices[3] = { 0, 1, 2 };
+        SDL_RenderGeometryRaw(renderer, nullptr, 
+                              &vertices[0].position, sizeof(SDL_Vertex), 
+                              &vertices[0].color, sizeof(SDL_Vertex), 
+                              nullptr, 0, 
+                              3, indices, 3, sizeof(int));
+
+        // 5. Малюємо ЕЛІПС (Пурпурний, математичний розрахунок на базі ліній)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 255, SDL_ALPHA_OPAQUE);
+        // Використовуємо згенеровані раніше дані (data[0].x = 999.0f) 
+        // для розрахунку центру та радіусів еліпса, щоб вони вписалися в екран
+        float cx = data[0].x - 599.0f;  // 999 - 599 = 400 (центр X)
+        float cy = data[0].y - 599.0f;  // 999 - 599 = 400 (центр Y)
+        float rx = 120.0f;              // радіус по X
+        float ry = 70.0f;               // радіус по Y
+        DrawEllipse(renderer, cx, cy, rx, ry);
+
+        // Відображення намальованого кадру на екрані
+        SDL_RenderPresent(renderer);
+        
+        // Невелика затримка для зменшення навантаження на CPU (~60 FPS)
+        SDL_Delay(16);
+    }
+
+    // Очищення ресурсів при виході
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
