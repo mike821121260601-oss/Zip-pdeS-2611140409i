@@ -1,0 +1,1072 @@
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
+<title>Шахи 7×7 — Червоні проти Синіх</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#171c23; --panel2:#1e242d; --line:#2b333f;
+    --txt:#e8ecf1; --dim:#93a1b1; --red:#e5352f; --blue:#3b6bf0;
+    --ok:#37c871;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    touch-action:manipulation; overscroll-behavior:none}
+  body{padding-bottom:26px}
+
+  /* ---------- Android-style status bar ---------- */
+  .statusbar{display:flex;justify-content:space-between;align-items:center;
+    padding:5px 14px;font-size:12px;color:#cfd8e3;background:#0a0d11;letter-spacing:.2px}
+  .statusbar .sb-r{display:flex;gap:7px;align-items:center;font-size:11px}
+  .batt{display:inline-block;width:20px;height:10px;border:1.5px solid #cfd8e3;border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;inset:1.5px;right:35%;background:var(--ok);border-radius:1px}
+
+  /* ---------- App bar ---------- */
+  .appbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:12px;
+    padding:11px 14px;background:linear-gradient(180deg,#141a21,#121720);
+    border-bottom:1px solid var(--line);box-shadow:0 4px 14px rgba(0,0,0,.35)}
+  .appbar .ttl{font-weight:700;font-size:17px;letter-spacing:.2px}
+  .appbar .sub{font-size:11.5px;color:var(--dim);margin-top:1px}
+  .appbar .grow{flex:1}
+  .iconbtn{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);
+    background:var(--panel2);color:var(--txt);font-size:20px;line-height:1;cursor:pointer}
+  .iconbtn:active{background:#2a323d}
+
+  /* ---------- Quick arrangement switcher ---------- */
+  .arrbar{display:flex;align-items:center;gap:9px;padding:8px 14px;background:#10151c;
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .arrbar .albl{font-size:11px;color:var(--dim)}
+  .segs{display:flex;gap:6px;flex-wrap:wrap}
+  .seg{border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-family:inherit;
+    font-size:11.5px;font-weight:650;padding:7px 11px;border-radius:9px;cursor:pointer;white-space:nowrap}
+  .seg:active{background:#2b333f}
+  .seg.on{background:#1d4ed8;border-color:#2a5be6;box-shadow:0 0 0 1px rgba(59,107,240,.4)}
+
+  /* ---------- Android overflow menu ---------- */
+  .sheet{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:60;display:none}
+  .sheet.on{display:block}
+  .menu{position:absolute;right:10px;top:96px;min-width:250px;max-width:min(94vw,420px);background:var(--panel2);
+    border:1px solid var(--line);border-radius:14px;padding:6px;
+    box-shadow:0 18px 40px rgba(0,0,0,.6);animation:pop .13s ease-out}
+  @keyframes pop{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}
+  .menu button{display:flex;width:100%;align-items:center;gap:11px;background:none;border:0;
+    color:var(--txt);font-size:14.5px;padding:12px 13px;border-radius:10px;text-align:left;cursor:pointer;
+    font-family:inherit}
+  .menu button:active{background:#2b333f}
+  .menu button[disabled]{color:#5b6674;cursor:default}
+  .menu hr{border:0;border-top:1px solid var(--line);margin:6px 8px}
+  .menu .mi{font-size:17px;width:20px;text-align:center}
+  .msub{border-top:1px solid var(--line);margin-top:6px;padding:6px 4px 2px;max-height:46vh;overflow:auto}
+  .msub .mh{font-size:10.5px;color:var(--dim);letter-spacing:.6px;text-transform:uppercase;padding:4px 10px 7px}
+  .mrow{display:flex;align-items:center;gap:8px;padding:5px 8px}
+  .mrow .mname{font-size:12.5px;font-weight:650;width:66px;flex:none}
+  .mrow .mstats{font-size:10.5px;color:var(--dim);line-height:1.35;text-align:right;margin-left:auto;padding-right:4px}
+  .mrow .mstats b{color:var(--txt)}
+  .mini2{border:1px solid var(--line);background:#121820;color:var(--txt);width:32px;height:30px;
+    border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit}
+  .mini2:active{background:#2b333f}
+  .mini2[disabled]{color:#5b6674;cursor:default}
+
+  /* ---------- Boards ---------- */
+  .boards{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;max-width:1700px;margin:0 auto;align-items:start}
+  @media (min-width:760px){ .boards{grid-template-columns:repeat(4,1fr);gap:14px;padding:14px} }
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 8px 9px;
+    box-shadow:0 6px 20px rgba(0,0,0,.3);min-width:0}
+  .card.t-red{border-color:rgba(229,53,47,.55);box-shadow:0 0 0 1px rgba(229,53,47,.22),0 6px 20px rgba(0,0,0,.4)}
+  .card.t-blue{border-color:rgba(59,107,240,.55);box-shadow:0 0 0 1px rgba(59,107,240,.22),0 6px 20px rgba(0,0,0,.4)}
+  .chead{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+  .chead .nm{font-weight:650;font-size:12px}
+  .chead .pal{font-size:9px;color:var(--dim);margin-top:1px}
+  .chead .grow{flex:1}
+  .turnbadge{display:flex;align-items:center;gap:4px;font-size:10px;font-weight:650;
+    padding:3px 7px;border-radius:999px;border:1px solid var(--line);background:#121820}
+  .turnbadge.red{color:#ff8b86;border-color:rgba(229,53,47,.5)}
+  .turnbadge.blue{color:#93b0ff;border-color:rgba(59,107,240,.5)}
+  .arw{width:12px;height:12px;display:block;animation:bob .9s ease-in-out infinite alternate}
+  @keyframes bob{from{transform:translateY(-2px)}to{transform:translateY(2px)}}
+  .arw.down{animation-name:bob2}
+  @keyframes bob2{from{transform:translateY(2px)}to{transform:translateY(-2px)}}
+  .mini{display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap}
+  .stat{font-size:9.5px;color:var(--dim);background:#121820;border:1px solid var(--line);
+    padding:2px 6px;border-radius:6px}
+  .stat b{color:var(--txt);font-weight:650}
+  .stat.pos b{color:#7ef0a4}
+  .stat.neg b{color:#ff9b96}
+
+  /* ---------- Board grid ---------- */
+  .bgrid{display:grid;grid-template-columns:repeat(7,1fr);grid-template-rows:repeat(7,1fr);
+    gap:0;width:100%;aspect-ratio:1/1;background:#0a0d11;border-radius:8px;padding:3px;
+    border:1px solid var(--line);user-select:none}
+  .cell{position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .cell .pc{width:86%;height:86%;display:block;pointer-events:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+  .cell .dot{position:absolute;width:30%;height:30%;border-radius:50%;background:rgba(20,25,32,.5);pointer-events:none}
+  .cell .ring{position:absolute;inset:6%;border-radius:50%;border:3px solid rgba(20,25,32,.62);pointer-events:none}
+  .cell.sel{box-shadow:inset 0 0 0 2px #111, inset 0 0 0 5px #ffd54a}
+  .cell.lastf{box-shadow:inset 0 0 0 2px rgba(255,255,255,.35)}
+  .cell.lastt{box-shadow:inset 0 0 0 2px rgba(255,255,255,.55)}
+  .cell.pcand{box-shadow:inset 0 0 0 2px #101418, inset 0 0 0 5px #37c871;animation:pulse .8s infinite alternate}
+  @keyframes pulse{from{opacity:.65}to{opacity:1}}
+  .cell .plnum{position:absolute;bottom:3%;right:7%;font-size:9px;font-weight:800;color:#0b1a10;
+    background:#37c871;border-radius:4px;padding:0 3px}
+  .cell .lbl{position:absolute;top:2%;left:5%;font-size:7px;color:rgba(10,13,17,.5);font-weight:700;pointer-events:none}
+
+  .cfoot{display:flex;gap:5px;align-items:center;margin-top:6px;flex-wrap:wrap}
+  .btn{border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-family:inherit;
+    font-size:10px;padding:7px 6px;border-radius:9px;cursor:pointer;font-weight:600;
+    flex:1 1 auto;min-width:0;white-space:nowrap}
+  .btn:active{background:#2b333f}
+  .btn.primary{background:#1d4ed8;border-color:#2a5be6}
+  .btn.warn{background:#7a2a26;border-color:#a13631}
+  .btn.ng{position:relative;min-width:96px;flex:1.3 1 auto;text-align:center}
+  .btn.ng .cnt{display:inline-block;min-width:17px;text-align:center;background:#0d1218;
+    border:1px solid var(--line);border-radius:5px;padding:0 4px;margin-left:5px;font-weight:800}
+  .btn.ng.armed{border-color:var(--ok);box-shadow:0 0 0 1px rgba(55,200,113,.35)}
+
+  .overlay{position:absolute;inset:0;background:rgba(8,11,15,.86);border-radius:12px;z-index:12;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:12px;text-align:center}
+  .overlay .big{font-size:12px;font-weight:750}
+  .overlay .sm{font-size:9.5px;color:var(--dim);line-height:1.45;max-width:230px}
+  .overlay .btn{font-size:10px;padding:7px 6px}
+  .boardbox{position:relative;width:100%;margin:0 auto}
+
+  /* ---------- Modal (arrangement / promotion) ---------- */
+  .modal{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.5);display:none;
+    align-items:center;justify-content:center;padding:18px;pointer-events:none}
+  .modal.on{display:flex}
+  .modal.bottom{align-items:flex-end;background:rgba(0,0,0,.22)}
+  .mbox{pointer-events:auto;max-height:82vh;overflow:auto}
+  .mbox{background:var(--panel2);border:1px solid var(--line);border-radius:18px;padding:16px 16px 14px;
+    width:100%;max-width:360px;box-shadow:0 22px 50px rgba(0,0,0,.7);animation:pop .15s ease-out}
+  .mbox h3{margin:0 0 3px;font-size:15.5px}
+  .mbox p{margin:0 0 12px;font-size:11.5px;color:var(--dim);line-height:1.45}
+  .figs{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:12px}
+  .figs button{background:#121820;border:1px solid var(--line);border-radius:12px;padding:9px 5px;color:var(--txt);
+    font-family:inherit;font-size:11.5px;font-weight:650;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px}
+  .figs button:active{background:#2b333f}
+  .figs svg{width:38px;height:38px}
+  .opts{display:grid;gap:7px}
+  .opts button{background:#121820;border:1px solid var(--line);border-radius:10px;padding:11px;color:var(--txt);
+    font-family:inherit;font-size:12.5px;cursor:pointer;text-align:left;font-weight:600}
+  .opts button:active{background:#2b333f}
+  .arr{display:grid;gap:9px}
+  .arr button{background:#121820;border:1px solid var(--line);border-radius:12px;padding:11px 12px;color:var(--txt);
+    font-family:inherit;font-size:12.5px;cursor:pointer;text-align:left}
+  .arr button:active{background:#2b333f}
+  .arr button.on{border-color:#2a5be6;box-shadow:0 0 0 1px rgba(59,107,240,.4)}
+  .arr .an{font-weight:700;display:block;margin-bottom:3px}
+  .arr .ad{font-size:10.5px;color:var(--dim);line-height:1.45}
+  .arr .rowprev{display:flex;gap:3px;margin-top:7px}
+  .arr .psq{width:16px;height:16px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800}
+
+  .rules{padding:14px;max-width:1500px;margin:0 auto;font-size:12.5px;color:var(--dim);line-height:1.62}
+  .rules h2{font-size:14px;color:var(--txt);margin:0 0 8px}
+  .rules ul{margin:6px 0 12px;padding-left:18px}
+  .rules li{margin:3px 0}
+  .rules b{color:var(--txt)}
+  .hide{display:none !important}
+</style>
+</head>
+<body>
+
+<div class="statusbar">
+  <div id="clock">--:--</div>
+  <div class="sb-r"><span>▂▄▆</span><span>Wi-Fi</span><span class="batt"></span></div>
+</div>
+
+<header class="appbar">
+  <div>
+    <div class="ttl">Шахи 7×7</div>
+    <div class="sub">Червоні проти Синіх · я з я</div>
+  </div>
+  <div class="grow"></div>
+  <button class="iconbtn" id="gmenu" aria-label="Системне меню">⋮</button>
+</header>
+
+<div class="arrbar">
+  <span class="albl">Розстановка:</span>
+  <div class="segs" id="segs"></div>
+</div>
+
+<div class="sheet" id="sheet">
+  <div class="menu">
+    <button id="m-arr"><span class="mi">⇄</span>Змінити розстановку</button>
+    <button id="m-allnew"><span class="mi">↻</span>Нова гра на всіх дошках</button>
+    <button id="m-rules"><span class="mi">?</span>Правила та очки</button>
+    <div class="msub" id="msub"></div>
+    <hr>
+    <button id="m-close"><span class="mi">✕</span>Закрити меню</button>
+  </div>
+</div>
+
+<main class="boards" id="boards"></main>
+
+<section class="rules">
+  <h2>Правила цієї гри</h2>
+  <ul>
+    <li>Дошка <b>7 на 7</b>. Грають <b>Червоні проти Синіх</b>. Перший хід — червоні.</li>
+    <li>У кожного гравця два рядки: <b>другий ряд — фігури</b>, <b>перший ряд — пішки</b>.</li>
+    <li><b>Розстановка</b> фігур (можна швидко змінити):
+      <br>• <b>тура · кінь · слон · слон · король · кінь · тура</b>;
+      <br>• <b>тура · кінь · слон · король · слон · кінь · тура</b>.</li>
+    <li>Коли два слони стоять <b>поруч</b>, вони завжди опиняються на <b>різних кольорах</b> — один білопольний, один темнопольний. Тому це фактично <b>інший варіант гри</b>: обидва фланги прикриті по діагоналі. У другій розстановці слони розведені королем.</li>
+    <li><b>Рокіровки немає</b>, мата немає. Зїсти короля — і всі його фігури та пішки зникають.</li>
+    <li>За зїденого короля дають <b>55</b>, і тоді потрібна <b>нова гра</b>.</li>
+    <li>Пішки ходять лише на 1 клітинку вперед у порожню клітинку, а б'ють діагонально вперед.</li>
+    <li>На останній лінії пішка перетворюється на <b>коня, слона або туру</b>, і ви обираєте клітинку: остання, передостання або своя перша (якщо там пусто).</li>
+    <li>Очки: кінь і слон — 3, тура — 5, пішка — 1, король — 55. Червоні <b>плюс</b>, сині <b>мінус</b>.</li>
+    <li>У меню дошки є <b>хід назад</b> і <b>хід вперед</b>, цифра суми ходів без зїдань обох гравців (назад до першого зїду) та очки всіх минулих зїдань.</li>
+    <li>Кнопка <b>нова гра</b> натискається <b>11 разів</b> — цифра на кнопці показує, скільки лишилось. Через 5 секунд цифра знову стає 11.</li>
+    <li>На смартфонах — <b>10 дошок</b>, на планшетах — <b>20 дошок</b> (по <b>5 екранів</b>) — для трохи пошкоджених сенсорів.</li>
+    <li>Гра <b>пам'ятає стан</b>: якщо вийти і знову відкрити — усі дошки та обрана розстановка залишаться як були.</li>
+  </ul>
+</section>
+
+<div class="modal" id="modal"><div class="mbox" id="mbox"></div></div>
+
+<script>
+'use strict';
+/* Шахи 7x7 — логіка гри (без DOM) */
+
+const N = 7;
+const RED = 'red';
+const BLUE = 'blue';
+
+/* Вартість фігур: кінь/слон 3, тура 5, пішка 1, король 55 */
+const PIECE_VALUE = { K: 55, R: 5, B: 3, N: 3, P: 1 };
+
+const THEMES = [
+  { name: 'жовтий / світло-сірий',                        a: '#e9d94a', b: '#dedede' },
+  { name: 'світло-зеленожовтий / світло-синьо-зелений',   a: '#d9ea8e', b: '#a9ddd0' },
+  { name: 'світло-оранжевий / світло-коричневий',        a: '#f7cd8f', b: '#cba26e' },
+  { name: 'світло-рожевий / світло-фіолетовий',          a: '#f9cbdf', b: '#c9b6ea' }
+];
+
+const FILES = 'abcdefg';
+const KNIGHT_DELTAS = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+
+/* На дошці 7x7 тура й слон усе одно не можуть пройти більше 6 клітинок,
+   тому тут дальність = повна ширина дошки (без штучних обмежень). */
+const ROOK_RANGE = N;
+const BISHOP_RANGE = N;
+
+/* Два варіанти розстановки. Перший — той, де слони стоять поруч
+   і через це один слон світлий, а другий темний. */
+const ARRANGEMENTS = [
+  { id: 'bb',  short: 'слон · слон',
+    label: 'тура · кінь · слон · слон · король · кінь · тура',
+    back: ['R', 'N', 'B', 'B', 'K', 'N', 'R'] },
+  { id: 'bkb', short: 'слон · король · слон',
+    label: 'тура · кінь · слон · король · слон · кінь · тура',
+    back: ['R', 'N', 'B', 'K', 'B', 'N', 'R'] }
+];
+const DEFAULT_ARRANGEMENT = 0;
+
+/* координата клітинки -> шахова нотація, напр. (6,4) -> e1 */
+function sq(r, c) { return FILES[c] + (N - r); }
+
+function emptyGrid() {
+  const g = [];
+  for (let r = 0; r < N; r++) g.push(new Array(N).fill(null));
+  return g;
+}
+
+function place(grid, r, c, t, color) { grid[r][c] = { t: t, color: color }; return grid; }
+
+function arrangementAt(layout) {
+  let i = Math.floor(layout || 0) % ARRANGEMENTS.length;
+  if (i < 0) i += ARRANGEMENTS.length;
+  return ARRANGEMENTS[i];
+}
+
+/* Початкова позиція 7x7.
+   Сивi зверху (рядки 0-1), червоні знизу (рядки 5-6).
+   Перший ряд — фігури, другий — пішки. */
+function makeGrid(layout) {
+  const g = emptyGrid();
+  const back = arrangementAt(layout).back;
+  for (let c = 0; c < N; c++) {
+    g[0][c] = { t: back[c], color: BLUE };
+    g[1][c] = { t: 'P', color: BLUE };
+    g[5][c] = { t: 'P', color: RED };
+    g[6][c] = { t: back[c], color: RED };
+  }
+  return g;
+}
+
+function pawnDir(color) { return color === RED ? -1 : 1; }
+
+/* Усі ходи фігури. Рокіровок нема. Король рухається лише на 1 клітинку.
+   Взяття власних фігур заборонено. Взяття короля дозволено (мата нема). */
+function pieceMoves(grid, r, c) {
+  const p = grid[r][c];
+  if (!p) return [];
+  const out = [];
+
+  const add = function (rr, cc) {
+    if (rr < 0 || rr >= N || cc < 0 || cc >= N) return false;
+    const q = grid[rr][cc];
+    if (q && q.color === p.color) return false;
+    out.push({ r: rr, c: cc, cap: q ? q.t : null });
+    return !q;
+  };
+
+  const slide = function (dr, dc, maxSteps) {
+    let rr = r + dr, cc = c + dc, steps = 0;
+    while (steps < maxSteps && add(rr, cc)) { rr += dr; cc += dc; steps++; }
+  };
+
+  if (p.t === 'P') {
+    const d = pawnDir(p.color);
+    const fr = r + d;
+    /* пішки: лише на 1 клітинку вперед у порожню клітинку (без подвійного ходу) */
+    if (fr >= 0 && fr < N && !grid[fr][c]) out.push({ r: fr, c: c, cap: null });
+    /* б'ють діагонально вперед */
+    for (const dc of [-1, 1]) {
+      const rr = r + d, cc = c + dc;
+      if (rr < 0 || rr >= N || cc < 0 || cc >= N) continue;
+      const q = grid[rr][cc];
+      if (q && q.color !== p.color) out.push({ r: rr, c: cc, cap: q.t });
+    }
+  } else if (p.t === 'R') {
+    slide(1, 0, ROOK_RANGE); slide(-1, 0, ROOK_RANGE);
+    slide(0, 1, ROOK_RANGE); slide(0, -1, ROOK_RANGE);
+  } else if (p.t === 'B') {
+    slide(1, 1, BISHOP_RANGE); slide(1, -1, BISHOP_RANGE);
+    slide(-1, 1, BISHOP_RANGE); slide(-1, -1, BISHOP_RANGE);
+  } else if (p.t === 'N') {
+    for (const d of KNIGHT_DELTAS) add(r + d[0], c + d[1]);
+  } else if (p.t === 'K') {
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      if (dr || dc) add(r + dr, c + dc);
+    }
+  }
+  return out;
+}
+
+/* компактне кодування позиції для збереження (щоб гра пам'ятала стан) */
+function encodeGrid(grid) {
+  let s = '';
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const p = grid[r][c];
+    if (!p) { s += '.'; continue; }
+    s += (p.color === RED ? p.t.toUpperCase() : p.t.toLowerCase());
+  }
+  return s;
+}
+
+function decodeGrid(str) {
+  const g = emptyGrid();
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const ch = str.charAt(r * N + c);
+    if (!ch || ch === '.') continue;
+    const t = ch.toUpperCase();
+    g[r][c] = { t: t, color: ch === t ? RED : BLUE };
+  }
+  return g;
+}
+
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+class Game {
+  constructor(theme, key, layout) {
+    this.theme = (theme || 0) % 4;
+    this.key = key;
+    this.layout = (layout === undefined || layout === null) ? DEFAULT_ARRANGEMENT : layout;
+    this.reset();
+  }
+
+  reset() {
+    this.grid = makeGrid(this.layout);
+    this.turn = RED;          /* перший хід червоних */
+    this.score = 0;           /* червоні +, сині - */
+    this.plies = 0;           /* сума ходів без зїдань обох гравців */
+    this.moves = 0;           /* усього півходів */
+    this.over = false;
+    this.winner = null;
+    this.promo = null;        /* перетворення пішки */
+    this.pendingKing = null;
+    this.sel = null;
+    this.last = null;
+    this.message = '';
+    this.hist = [this.snap()];
+    this.hi = 0;
+  }
+
+  snap() {
+    return clone({
+      grid: this.grid, turn: this.turn, score: this.score, plies: this.plies,
+      moves: this.moves, over: this.over, winner: this.winner, promo: this.promo,
+      pendingKing: this.pendingKing, last: this.last, message: this.message, sel: null
+    });
+  }
+
+  restore(s) { Object.assign(this, clone(s)); this.sel = null; }
+
+  commit() {
+    this.hist = this.hist.slice(0, this.hi + 1);
+    this.hist.push(this.snap());
+    this.hi = this.hist.length - 1;
+  }
+
+  canUndo() { return this.hi > 0; }
+  canRedo() { return this.hi < this.hist.length - 1; }
+  undo() { if (!this.canUndo()) return false; this.hi--; this.restore(this.hist[this.hi]); return true; }
+  redo() { if (!this.canRedo()) return false; this.hi++; this.restore(this.hist[this.hi]); return true; }
+
+  legalTargets() { return this.sel ? pieceMoves(this.grid, this.sel[0], this.sel[1]) : []; }
+
+  canPlay() { return !this.over && !this.promo; }
+
+  tap(r, c) {
+    if (!this.canPlay()) return false;
+    if (this.sel) {
+      const t = this.legalTargets().filter(function (m) { return m.r === r && m.c === c; })[0];
+      if (t) return this.move(this.sel[0], this.sel[1], r, c);
+    }
+    const p = this.grid[r][c];
+    if (p && p.color === this.turn) { this.sel = [r, c]; return true; }
+    this.sel = null;
+    return false;
+  }
+
+  move(r1, c1, r2, c2) {
+    const p = this.grid[r1][c1];
+    if (!p) return false;
+    const target = this.grid[r2][c2];
+    const sign = p.color === RED ? 1 : -1;
+
+    if (target) this.score += PIECE_VALUE[target.t] * sign;
+
+    this.grid[r2][c2] = p;
+    this.grid[r1][c1] = null;
+    this.plies = target ? 0 : this.plies + 1;
+    this.moves += 1;
+    this.last = { from: [r1, c1], to: [r2, c2], cap: target ? target.t : null };
+    this.sel = null;
+
+    const killedKing = !!(target && target.t === 'K');
+    const promoRow = p.color === RED ? 0 : N - 1;
+
+    /* взяття короля має пріоритет: гра одразу завершується */
+    if (killedKing) {
+      this.eliminate(target.color);
+    } else if (p.t === 'P' && r2 === promoRow) {
+      this.promo = { r: r2, c: c2, color: p.color, step: 'piece', figure: null, options: null };
+      this.message = 'Пішка дійшла до останньої лінії — оберіть фігуру.';
+    } else {
+      this.turn = this.turn === RED ? BLUE : RED;
+      this.message = '';
+    }
+    this.commit();
+    return true;
+  }
+
+  /* Короля зїдено: усі фігури й пішки цього кольору зникають,
+     очки додаються (фігури; пішки не рахуються), потім потрібна нова гра. */
+  eliminate(killedColor) {
+    const sign = killedColor === BLUE ? 1 : -1;
+    let bonus = 0;
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const p = this.grid[r][c];
+      if (p && p.color === killedColor) {
+        if (p.t !== 'K' && p.t !== 'P') bonus += PIECE_VALUE[p.t];
+        this.grid[r][c] = null;
+      }
+    }
+    this.score += bonus * sign;
+    this.over = true;
+    this.winner = killedColor === BLUE ? RED : BLUE;
+    this.turn = this.winner;
+    this.promo = null;
+    this.pendingKing = null;
+    this.sel = null;
+    this.message = (killedColor === BLUE ? 'Короля СИНІХ зїдено!' : 'Короля ЧЕРВОНИХ зїдено!') +
+      ' Усі фігури й пішки зникли. Потрібна НОВА ГРА.';
+  }
+
+  /* крок 1 перетворення: вибір фігури */
+  promoteTo(figure) {
+    if (!this.promo || this.promo.step !== 'piece') return false;
+    if (['N', 'B', 'R'].indexOf(figure) < 0) return false;
+    this.promo.figure = figure;
+    const home = this.promo.color === RED ? N - 1 : 0;
+    const back = this.promo.color === RED ? this.promo.r + 1 : this.promo.r - 1;
+    const opts = [];
+    opts.push({ r: this.promo.r, c: this.promo.c, kind: 'last', label: 'остання лінія' });
+    if (back >= 0 && back < N && !this.grid[back][this.promo.c]) {
+      opts.push({ r: back, c: this.promo.c, kind: 'penult', label: 'передостання лінія' });
+    }
+    if (home !== this.promo.r && home !== back && !this.grid[home][this.promo.c]) {
+      opts.push({ r: home, c: this.promo.c, kind: 'home', label: 'своя перша лінія' });
+    }
+    this.promo.options = opts;
+    this.promo.step = 'cell';
+    this.message = 'Тепер оберіть клітинку для нової фігури.';
+    return true;
+  }
+
+  /* крок 2 перетворення: вибір клітинки */
+  placePromoted(idx) {
+    if (!this.promo || this.promo.step !== 'cell') return false;
+    const o = this.promo.options[idx];
+    if (!o) return false;
+    this.grid[o.r][o.c] = { t: this.promo.figure, color: this.promo.color };
+    this.promo = null;
+    this.turn = this.turn === RED ? BLUE : RED;
+    this.message = '';
+    this.commit();   /* окремий крок історії: хід назад вертає до вибору фігури */
+    return true;
+  }
+}
+
+
+
+/* ======================= UI ======================= */
+(function(){
+  'use strict';
+  var RED = 'red', BLUE = 'blue';
+  var COL = { red:'#e5352f', blue:'#3b6bf0' };
+  var DARK = '#0b0e12';
+  var STORE_KEY = 'chess7x7_state_v1';
+  var LAYOUT_KEY = 'chess7x7_layout_v1';
+
+  var BOARD_DEFS = [];
+  for (var bi = 0; bi < 20; bi++) BOARD_DEFS.push({ id:'b' + (bi + 1), theme: bi % 4 });
+
+  function svgWrap(inner){ return '<svg class="pc" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">' + inner + '</svg>'; }
+
+  /* Фігури малюються прямокутниками та кругами */
+  function pieceShape(t, color, up){
+    var m = COL[color];
+    if (t === 'P') {                       /* пішка — трикутник */
+      var pts = up ? '50,10 14,88 86,88' : '50,90 14,12 86,12';
+      return '<polygon points="'+pts+'" fill="'+m+'" stroke="'+DARK+'" stroke-width="4" stroke-linejoin="round"/>';
+    }
+    if (t === 'R')                         /* тура — хрест, як значок + */
+      return '<path d="M40 10 h20 v30 h30 v20 h-30 v30 h-20 v-30 h-30 v-20 h30 z" fill="'+m+'" stroke="'+DARK+'" stroke-width="4" stroke-linejoin="round"/>';
+    if (t === 'B')                         /* слон — 4 квадрати по кутах клітинки */
+      return '<rect x="7" y="7" width="30" height="30" fill="'+m+'" stroke="'+DARK+'" stroke-width="3.5"/>'
+           + '<rect x="63" y="7" width="30" height="30" fill="'+m+'" stroke="'+DARK+'" stroke-width="3.5"/>'
+           + '<rect x="7" y="63" width="30" height="30" fill="'+m+'" stroke="'+DARK+'" stroke-width="3.5"/>'
+           + '<rect x="63" y="63" width="30" height="30" fill="'+m+'" stroke="'+DARK+'" stroke-width="3.5"/>';
+    if (t === 'N')                         /* кінь — круг і менший чорний круг біля краю, діагонально вниз */
+      return '<circle cx="42" cy="38" r="31" fill="'+m+'" stroke="'+DARK+'" stroke-width="4"/>'
+           + '<circle cx="73" cy="76" r="15" fill="#000000"/>';
+    if (t === 'K')                         /* король — квадрат і менший чорний у центрі */
+      return '<rect x="16" y="16" width="68" height="68" fill="'+m+'" stroke="'+DARK+'" stroke-width="4"/>'
+           + '<rect x="37" y="37" width="26" height="26" fill="#000000"/>';
+    return '';
+  }
+  function pieceSVG(t, color){ return svgWrap(pieceShape(t, color, color === RED)); }
+  function figGlyph(t){ return (t === 'K' ? '♔' : t === 'N' ? '♘' : t === 'B' ? '♗' : t === 'R' ? '♖' : '♙'); }
+  function figName(t){ return (t === 'K' ? 'король' : t === 'N' ? 'кінь' : t === 'B' ? 'слон' : t === 'R' ? 'тура' : 'пішка'); }
+
+  function arrowSVG(color){
+    var up = color === RED;
+    var inner = up
+      ? '<path d="M50 12 L88 58 H64 V90 H36 V58 H12 Z"/>'
+      : '<path d="M50 88 L12 42 H36 V10 H64 V42 H88 Z"/>';
+    return '<svg class="arw'+(up?'':' down')+'" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+         + '<g fill="'+COL[color]+'">'+inner+'</g></svg>';
+  }
+
+  var boards = [];
+  var layout = DEFAULT_ARRANGEMENT;   /* поточна розстановка для всіх дошок */
+
+  /* ---------- збереження стану (гра пам'ятає партію) ---------- */
+  function saveState(){
+    try {
+      var data = [];
+      for (var i = 0; i < boards.length; i++){
+        var g = boards[i].g;
+        data.push({
+          grid: encodeGrid(g.grid), turn: g.turn, score: g.score, plies: g.plies,
+          moves: g.moves, over: g.over, winner: g.winner, last: g.last, message: g.message
+        });
+      }
+      localStorage.setItem(STORE_KEY, JSON.stringify(data));
+      localStorage.setItem(LAYOUT_KEY, String(layout));
+    } catch(e){}
+  }
+
+  function loadState(){
+    var data = null, lay = null;
+    try { data = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch(e){ data = null; }
+    try { lay = localStorage.getItem(LAYOUT_KEY); } catch(e){ lay = null; }
+    return { data: data, layout: (lay === null ? null : Number(lay)) };
+  }
+
+  function applyState(B, s){
+    var g = B.g;
+    try {
+      if (s && typeof s.grid === 'string' && s.grid.length === N * N){
+        g.grid = decodeGrid(s.grid);
+        g.turn = (s.turn === BLUE) ? BLUE : RED;
+        g.score = Number(s.score) || 0;
+        g.plies = Number(s.plies) || 0;
+        g.moves = Number(s.moves) || 0;
+        g.over = !!s.over;
+        g.winner = s.winner || null;
+        g.last = s.last || null;
+        g.message = s.message || '';
+        g.promo = null;
+        g.sel = null;
+        g.hist = [g.snap()];
+        g.hi = 0;
+      }
+    } catch(e){}
+  }
+
+  function buildBoard(def, idx){
+    var wrap = document.createElement('section');
+    wrap.className = 'card';
+    wrap.innerHTML =
+      '<div class="chead">'
+      +   '<div><div class="nm">Дошка '+(idx+1)+'</div>'
+      +   '<div class="pal">'+THEMES[def.theme].name+'</div></div>'
+      +   '<div class="grow"></div>'
+      +   '<div class="turnbadge red" data-turn></div>'
+      + '</div>'
+      + '<div class="mini">'
+      +   '<div class="stat">ходів без зїдань: <b data-plies>0</b></div>'
+      +   '<div class="stat" data-score-box>очки: <b data-score>0</b></div>'
+      +   '<div class="stat">ходів: <b data-moves>0</b></div>'
+      + '</div>'
+      + '<div class="boardbox"><div class="bgrid" data-grid></div><div data-ov></div></div>'
+      + '<div class="cfoot">'
+      +   '<button class="btn" data-undo>← Назад</button>'
+      +   '<button class="btn" data-redo>Вперед →</button>'
+      +   '<button class="btn ng" data-ng>Нова гра<span class="cnt" data-cnt>11</span></button>'
+      + '</div>';
+
+    var B = {
+      def: def,
+      g: new Game(def.theme, def.id, layout),
+      ng: { left: 11, timer: null },
+      el: {},
+      cells: []
+    };
+    B.el.card      = wrap;
+    B.el.badge     = wrap.querySelector('[data-turn]');
+    B.el.plies     = wrap.querySelector('[data-plies]');
+    B.el.score     = wrap.querySelector('[data-score]');
+    B.el.scoreBox  = wrap.querySelector('[data-score-box]');
+    B.el.moves     = wrap.querySelector('[data-moves]');
+    B.el.grid      = wrap.querySelector('[data-grid]');
+    B.el.ov        = wrap.querySelector('[data-ov]');
+    B.el.undo      = wrap.querySelector('[data-undo]');
+    B.el.redo      = wrap.querySelector('[data-redo]');
+    B.el.ngBtn     = wrap.querySelector('[data-ng]');
+    B.el.cnt       = wrap.querySelector('[data-cnt]');
+
+    /* --- 7x7 grid --- */
+    var grid = B.el.grid;
+    for (var r = 0; r < N; r++){
+      for (var c = 0; c < N; c++){
+        var cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.style.background = ((r + c) % 2 === 0) ? THEMES[def.theme].a : THEMES[def.theme].b;
+        cell.dataset.r = r; cell.dataset.c = c;
+        cell.addEventListener('click', (function(rr, cc, bb){
+          return function(){ onCell(bb, rr, cc); };
+        })(r, c, B));
+        grid.appendChild(cell);
+        B.cells.push({ r:r, c:c, el:cell });
+      }
+    }
+
+    B.el.undo.addEventListener('click', function(){ if (B.g.undo()) afterHist(B); });
+    B.el.redo.addEventListener('click', function(){ if (B.g.redo()) afterHist(B); });
+    B.el.ngBtn.addEventListener('click', function(){ tapNewGame(B); });
+
+    return B;
+  }
+
+  function onCell(B, r, c){
+    var g = B.g;
+    if (g.promo && g.promo.step === 'cell'){
+      var hit = -1;
+      for (var i = 0; i < g.promo.options.length; i++){
+        if (g.promo.options[i].r === r && g.promo.options[i].c === c) hit = i;
+      }
+      if (hit >= 0){ closeModal(); g.placePromoted(hit); render(B); saveState(); }
+      return;
+    }
+    if (g.tap(r, c)){ render(B); saveState(); maybePromote(B); }
+  }
+
+  function render(B){
+    var g = B.g;
+
+    /* стрілка — хто ходить */
+    var moving = g.over ? g.winner : g.turn;
+    B.el.badge.className = 'turnbadge ' + moving;
+    B.el.badge.innerHTML = arrowSVG(moving) + '<span>' + (g.over
+        ? (moving === RED ? 'Перемогли Червоні' : 'Перемогли Сині')
+        : (moving === RED ? 'Хід Червоні' : 'Хід Сині')) + '</span>';
+    B.el.card.className = 'card t-' + moving;
+
+    B.el.plies.textContent = String(g.plies);
+    B.el.moves.textContent = String(g.moves);
+    var s = g.score;
+    B.el.score.textContent = (s > 0 ? '+' : '') + s;
+    B.el.scoreBox.className = 'stat ' + (s > 0 ? 'pos' : (s < 0 ? 'neg' : ''));
+
+    B.el.undo.disabled = !g.canUndo();
+    B.el.redo.disabled = !g.canRedo();
+    buildSubmenu();
+
+    var targets = {};
+    if (g.sel && g.canPlay()){
+      var mv = g.legalTargets();
+      for (var i = 0; i < mv.length; i++) targets[mv[i].r + ':' + mv[i].c] = mv[i];
+    }
+
+    for (var k = 0; k < B.cells.length; k++){
+      var it = B.cells[k], r = it.r, c = it.c, el = it.el, p = g.grid[r][c];
+      var cls = 'cell';
+      if (g.sel && g.sel[0] === r && g.sel[1] === c) cls += ' sel';
+      if (g.last){
+        if (g.last.from[0] === r && g.last.from[1] === c) cls += ' lastf';
+        if (g.last.to[0] === r && g.last.to[1] === c) cls += ' lastt';
+      }
+      if (g.promo && g.promo.step === 'cell'){
+        for (var q = 0; q < g.promo.options.length; q++)
+          if (g.promo.options[q].r === r && g.promo.options[q].c === c) cls += ' pcand';
+      }
+      el.className = cls;
+
+      var hit = targets[r + ':' + c];
+      var inner = '';
+      if (p) inner += pieceSVG(p.t, p.color);
+      if (hit) inner += hit.cap ? '<span class="ring"></span>' : '<span class="dot"></span>';
+      if (g.promo && g.promo.step === 'cell'){
+        for (var w = 0; w < g.promo.options.length; w++)
+          if (g.promo.options[w].r === r && g.promo.options[w].c === c) inner += '<span class="plnum">' + (w + 1) + '</span>';
+      }
+      el.innerHTML = inner;
+    }
+
+    /* оверлей кінця гри */
+    var ov = B.el.ov.querySelector('.overlay');
+    if (g.over){
+      if (!ov){
+        ov = document.createElement('div');
+        ov.className = 'overlay';
+        ov.innerHTML = '<div class="big"></div><div class="sm"></div>'
+          + '<button class="btn warn" data-ng2>Нова гра<span class="cnt" data-cnt2>11</span></button>';
+        B.el.ov.appendChild(ov);
+        ov.querySelector('[data-ng2]').addEventListener('click', function(ev){
+          ev.stopPropagation();
+          if (!B.ov_ng) B.ov_ng = { left: 11, timer: null };
+          bumpCounter(B, B.ov_ng);
+        });
+      }
+      ov.querySelector('.big').textContent = g.message.split('.')[0] || 'Гру завершено';
+      ov.querySelector('.sm').innerHTML = 'Усі фігури й пішки того кольору зникли з дошки.<br>'
+        + 'Очки цієї дошки: <b>' + (g.score > 0 ? '+' : '') + g.score + '</b>.<br>Потрібна <b>нова гра</b> — натисніть кнопку 11 разів.';
+      var c2 = ov.querySelector('[data-cnt2]');
+      if (c2) c2.textContent = String(B.ov_ng ? B.ov_ng.left : B.ng.left);
+    } else if (ov) {
+      ov.remove();
+    }
+    syncCounters(B);
+  }
+
+  /* --- кнопка «Нова гра»: 11 натискань, цифра скидається через 5 с --- */
+  function syncCounters(B){
+    B.el.cnt.textContent = String(B.ng.left);
+    B.el.ngBtn.classList.toggle('armed', B.ng.left < 11);
+    var c2 = B.el.ov.querySelector('[data-cnt2]');
+    if (c2) c2.textContent = String(B.ov_ng ? B.ov_ng.left : B.ng.left);
+  }
+
+  function bumpCounter(B, st){
+    st.left -= 1;
+    if (st.timer){ clearTimeout(st.timer); st.timer = null; }
+    if (st.left <= 0){                      /* 11-те натискання -> нова гра */
+      B.ng = { left: 11, timer: null };
+      B.ov_ng = null;
+      closeModal();
+      B.g.reset();
+      render(B);
+      syncCounters(B);
+      saveState();
+      return;
+    }
+    syncCounters(B);
+    st.timer = setTimeout(function(){
+      st.left = 11; st.timer = null;
+      syncCounters(B);
+      buildSubmenu();
+    }, 5000);
+  }
+
+  function tapNewGame(B){
+    var st = (B.g.over && B.ov_ng) ? B.ov_ng : B.ng;
+    bumpCounter(B, st);
+  }
+
+  /* --- перетворення пішки --- */
+  function maybePromote(B){
+    if (!B.g.promo) return;
+    openPromoModal(B);
+  }
+
+  function openPromoModal(B){
+    var g = B.g;
+    var mbox = document.getElementById('mbox');
+    if (g.promo.step === 'piece'){
+      mbox.innerHTML = '<h3>Перетворення пішки</h3>'
+        + '<p>Пішка на останній лінії. Оберіть фігуру, а потім клітинку на дошці.</p>'
+        + '<div class="figs">'
+        +   '<button data-fig="N">'+pieceSVG('N', g.promo.color)+'Кінь · 3</button>'
+        +   '<button data-fig="B">'+pieceSVG('B', g.promo.color)+'Слон · 3</button>'
+        +   '<button data-fig="R">'+pieceSVG('R', g.promo.color)+'Тура · 5</button>'
+        + '</div>';
+      var btns = mbox.querySelectorAll('[data-fig]');
+      for (var i = 0; i < btns.length; i++){
+        btns[i].addEventListener('click', (function(f, bb){
+          return function(){ bb.g.promoteTo(f); closeModal(); render(bb); saveState(); openPromoModal(bb); };
+        })(btns[i].dataset.fig, B));
+      }
+    } else {
+      var opts = g.promo.options, html = '';
+      for (var j = 0; j < opts.length; j++){
+        var o = opts[j];
+        html += '<button data-opt="' + j + '">' + (j + 1) + '. ' + o.label
+             + ' · ' + sq(o.r, o.c) + (o.kind === 'home' ? ' (своя сторона)' : '') + '</button>';
+      }
+      mbox.innerHTML = '<h3>Куди поставити фігуру?</h3>'
+        + '<p>Оберіть клітинку: торкніться підсвіченої клітинки на дошці або варіанта нижче.</p>'
+        + '<div class="opts">' + html + '</div>';
+      var ob = mbox.querySelectorAll('[data-opt]');
+      for (var t = 0; t < ob.length; t++){
+        ob[t].addEventListener('click', (function(ix, bb){
+          return function(){ bb.g.placePromoted(ix); closeModal(); render(bb); saveState(); };
+        })(Number(ob[t].dataset.opt), B));
+      }
+    }
+    var mm = document.getElementById('modal');
+    mm.classList.add('on');
+    mm.classList.toggle('bottom', g.promo.step === 'cell');
+  }
+
+  /* --- швидка зміна розстановки --- */
+  function previewRow(arr, color){
+    var html = '<div class="rowprev">';
+    for (var i = 0; i < arr.back.length; i++){
+      var t = arr.back[i];
+      var dark = ((0 + i) % 2 === 1);           /* колір клітинки у верхньому рядку */
+      html += '<span class="psq" style="background:' + (dark ? '#b9b9b9' : '#e9d94a')
+           +  ';color:' + (color === 'red' ? COL.red : COL.blue) + '">' + figGlyph(t) + '</span>';
+    }
+    return html + '</div>';
+  }
+
+  function renderSegs(){
+    var box = document.getElementById('segs');
+    if (!box) return;
+    box.innerHTML = '';
+    for (var i = 0; i < ARRANGEMENTS.length; i++){
+      var a = ARRANGEMENTS[i];
+      var b = document.createElement('button');
+      b.className = 'seg' + (i === layout ? ' on' : '');
+      b.textContent = a.short;
+      b.title = a.label;
+      b.addEventListener('click', (function(ix){ return function(){ setLayout(ix, true); }; })(i));
+      box.appendChild(b);
+    }
+  }
+
+  function openArrModal(){
+    var mbox = document.getElementById('mbox');
+    var html = '<h3>Розстановка фігур</h3><p>Оберіть, як стоять фігури. Це змінює гру на всіх дошках і починає нову партію.</p><div class="arr">';
+    for (var i = 0; i < ARRANGEMENTS.length; i++){
+      var a = ARRANGEMENTS[i];
+      html += '<button data-arr="' + i + '"' + (i === layout ? ' class="on"' : '') + '>'
+           +   '<span class="an">' + a.label + '</span>'
+           +   '<span class="ad">' + (i === 0
+                 ? 'Два слони поруч — один білопольний, один темнопольний. Інакший баланс флангів.'
+                 : 'Слони розведені королем (класичний порядок).') + '</span>'
+           +   previewRow(a, 'red') + previewRow(a, 'blue')
+           + '</button>';
+    }
+    html += '</div>';
+    mbox.innerHTML = html;
+    var bs = mbox.querySelectorAll('[data-arr]');
+    for (var k = 0; k < bs.length; k++){
+      bs[k].addEventListener('click', (function(ix){
+        return function(){ setLayout(ix, true); closeModal(); };
+      })(Number(bs[k].dataset.arr)));
+    }
+    var mm = document.getElementById('modal');
+    mm.classList.add('on');
+    mm.classList.remove('bottom');
+  }
+
+  /* змінити розстановку: перебрати дошки на нову позицію і запам'ятати */
+  function setLayout(ix, resetAll){
+    if (ix === layout && !resetAll) return;
+    layout = ix;
+    for (var i = 0; i < boards.length; i++){
+      var B = boards[i];
+      if (B.ng.timer) clearTimeout(B.ng.timer);
+      if (B.ov_ng && B.ov_ng.timer) clearTimeout(B.ov_ng.timer);
+      B.ng = { left: 11, timer: null };
+      B.ov_ng = null;
+      B.g.layout = layout;
+      B.g.reset();
+      closeModal();
+      render(B);
+    }
+    renderSegs();
+    buildSubmenu();
+    saveState();
+  }
+
+  /* --- підменю в системному меню: хід назад/вперед,
+         сума ходів без зїдань і очки минулих зїдань для кожної дошки --- */
+  function buildSubmenu(){
+    var box = document.getElementById('msub');
+    if (!box) return;
+    var html = '<div class="mh">Керування дошками</div>';
+    for (var i = 0; i < boards.length; i++){
+      var g = boards[i].g, s = g.score;
+      html += '<div class="mrow">'
+        +   '<div class="mname">Дошка ' + (i + 1) + '</div>'
+        +   '<div class="mstats">без зїдань: <b>' + g.plies + '</b>'
+        +   ' · зїдено: <b>' + (s > 0 ? '+' : '') + s + '</b><br>'
+        +   (g.over ? 'гра завершена' : (g.turn === RED ? 'хід Червоні' : 'хід Сині'))
+        +   ' · півходів: <b>' + g.moves + '</b></div>'
+        +   '<button class="mini2" data-su="' + i + '"' + (g.canUndo() ? '' : ' disabled') + '>←</button>'
+        +   '<button class="mini2" data-sr="' + i + '"' + (g.canRedo() ? '' : ' disabled') + '>→</button>'
+        + '</div>';
+    }
+    box.innerHTML = html;
+    var us = box.querySelectorAll('[data-su]'), rs = box.querySelectorAll('[data-sr]'), k;
+    for (k = 0; k < us.length; k++){
+      us[k].addEventListener('click', (function(ix){
+        return function(){ if (boards[ix].g.undo()) afterHist(boards[ix]); };
+      })(Number(us[k].dataset.su)));
+    }
+    for (k = 0; k < rs.length; k++){
+      rs[k].addEventListener('click', (function(ix){
+        return function(){ if (boards[ix].g.redo()) afterHist(boards[ix]); };
+      })(Number(rs[k].dataset.sr)));
+    }
+  }
+
+  function closeModal(){
+    var m = document.getElementById('modal');
+    m.classList.remove('on'); m.classList.remove('bottom');
+  }
+  /* після ходу назад/вперед: підтягнути модалку перетворення до стану */
+  function afterHist(B){
+    render(B); buildSubmenu(); saveState();
+    if (B.g.promo) openPromoModal(B); else closeModal();
+  }
+
+  /* --- ініціалізація: телефон — 10 дошок, планшет — 20 --- */
+  var host = document.getElementById('boards');
+  var wide = false;
+  try { wide = window.matchMedia('(min-width:760px)').matches; } catch(e){}
+  var limit = wide ? 20 : 10;
+  var saved = loadState();
+  if (saved.layout !== null && !isNaN(saved.layout)) {
+    layout = Math.abs(Math.floor(saved.layout)) % ARRANGEMENTS.length;
+  }
+  for (var i = 0; i < BOARD_DEFS.length; i++){
+    if (i >= limit) break;
+    var B = buildBoard(BOARD_DEFS[i], i);
+    applyState(B, saved.data && saved.data[i]);
+    boards.push(B);
+    host.appendChild(B.el.card);
+    render(B);
+  }
+  try {
+    window.matchMedia('(min-width:760px)').addEventListener('change', function(e){
+      if (e.matches) location.reload();
+    });
+  } catch(e){}
+  renderSegs();
+  buildSubmenu();
+  saveState();
+
+  /* системне меню */
+  var sheet = document.getElementById('sheet');
+  document.getElementById('gmenu').addEventListener('click', function(){ sheet.classList.add('on'); });
+  sheet.addEventListener('click', function(ev){ if (ev.target === sheet) sheet.classList.remove('on'); });
+  document.getElementById('m-close').addEventListener('click', function(){ sheet.classList.remove('on'); });
+  document.getElementById('m-arr').addEventListener('click', function(){ sheet.classList.remove('on'); openArrModal(); });
+  document.getElementById('m-allnew').addEventListener('click', function(){
+    for (var i = 0; i < boards.length; i++){
+      if (boards[i].ng.timer) clearTimeout(boards[i].ng.timer);
+      if (boards[i].ov_ng && boards[i].ov_ng.timer) clearTimeout(boards[i].ov_ng.timer);
+      boards[i].ng = { left: 11, timer: null };
+      boards[i].ov_ng = null;
+      boards[i].g.reset();
+      render(boards[i]);
+    }
+    saveState(); sheet.classList.remove('on'); buildSubmenu();
+  });
+  document.getElementById('m-rules').addEventListener('click', function(){
+    sheet.classList.remove('on');
+    var r = document.querySelector('.rules');
+    r.scrollIntoView({ behavior:'smooth', block:'start' });
+  });
+
+  /* годинник у статус-барі */
+  function tick(){
+    var d = new Date();
+    document.getElementById('clock').textContent =
+      ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
+  }
+  tick(); setInterval(tick, 20000);
+
+  /* клік по фону модалки */
+  document.getElementById('modal').addEventListener('click', function(ev){ if (ev.target.id === 'modal') closeModal(); });
+
+  /* тестові гачки (не впливають на гру) */
+  window.__boards = boards;
+  window.__layout = function(){ return layout; };
+  window.__setLayout = function(ix){ setLayout(ix, true); };
+})();
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
