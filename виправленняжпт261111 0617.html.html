@@ -1,0 +1,641 @@
+          
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>POOL GAME</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#10151b;color:white;
+ font-family:Arial;text-align:center;
+}
+h2{margin:12px}
+.panel{padding:8px;max-width:650px;margin:auto}
+select,button{
+ background:#263747;color:white;
+ border:1px solid #71899a;
+ border-radius:8px;padding:11px;
+ margin:4px;font-size:15px;
+}
+button:active{background:#168b65}
+#game{display:none}
+canvas{
+ display:block;width:100%;height:auto;
+ background:#075b36;border:2px solid #aaa;
+ touch-action:none;
+}
+#info{padding:10px;font-size:15px}
+.small{font-size:12px;color:#b9c9d4}
+#error{color:#ff6666;padding:10px}
+</style>
+</head>
+<body>
+
+<h2>🎱 POOL GAME</h2>
+
+<div id="menu" class="panel">
+ <p>Вибери гру</p>
+ <select id="gameType">
+  <option value="8">8 BALL</option>
+  <option value="9">9 BALL</option>
+  <option value="free">FREE POOL</option>
+  <option value="plain">BILLIARDS WITHOUT NUMBERS</option>
+  <option value="custom">CUSTOM POOL</option>
+ </select>
+
+ <p>Кількість куль</p>
+ <select id="ballCount">
+  <option value="9">9</option>
+  <option value="15" selected>15</option>
+  <option value="30">30</option>
+  <option value="45">45</option>
+  <option value="60">60</option>
+ </select>
+
+ <p>Гравці</p>
+ <select id="players">
+  <option value="humanAI">Людина проти комп'ютера</option>
+  <option value="AIhuman">Комп'ютер починає</option>
+  <option value="human2">Двоє людей</option>
+  <option value="AI2">Комп'ютер проти комп'ютера</option>
+  <option value="random">Випадковий гравець</option>
+ </select>
+
+ <p>Вигляд куль</p>
+ <select id="style">
+  <option value="mixed">Кольорові + смугасті</option>
+  <option value="solid">Тільки кольорові</option>
+  <option value="stripe">Тільки смугасті</option>
+  <option value="plain">Одноколірні</option>
+  <option value="checker">Шаховий візерунок</option>
+  <option value="random">Випадкові</option>
+ </select>
+
+ <p>Номери куль</p>
+ <select id="numbers">
+  <option value="yes">З номерами</option>
+  <option value="no">Без номерів</option>
+ </select>
+
+ <br>
+ <button id="startBtn">START GAME</button>
+ <div id="error"></div>
+ <p class="small">2D • TOUCH • 6 POCKETS • PHYSICS</p>
+</div>
+
+<div id="game">
+ <div id="info">Гравець 1</div>
+ <canvas id="table" width="1000" height="560"></canvas>
+
+ <div>
+  <button id="newBtn">NEW GAME</button>
+  <button id="menuBtn">MENU</button>
+  <button id="soundBtn">SOUND</button>
+ </div>
+
+ <p>Музика з телефона:</p>
+ <input type="file" id="musicFile" accept="audio/*">
+ <audio id="music" controls loop></audio>
+ <p class="small">
+ Потягни від білої кулі назад для прицілювання.
+ Відпусти палець для удару.
+ </p>
+</div>
+
+<script>
+"use strict";
+
+const $=id=>document.getElementById(id);
+const canvas=$("table");
+const ctx=canvas.getContext("2d");
+
+const W=1000,H=560;
+const L=55,R=945,T=55,B=505;
+const BR=13,PR=27;
+
+const pockets=[
+ [55,55],[500,45],[945,55],
+ [55,505],[500,515],[945,505]
+];
+
+const colors=[
+ "#f4d21f","#1767d5","#e83d35",
+ "#7134a0","#f28b16","#168e55",
+ "#8d2633","#171717","#e6c82b",
+ "#2464d5","#e63a34","#7438a6",
+ "#f28a16","#178d54","#8d2633"
+];
+
+let balls=[];
+let cue=null;
+let currentPlayer=1;
+let mode="humanAI";
+let gameType="8";
+let ballStyle="mixed";
+let showNumbers=true;
+let score=[0,0];
+let dragging=false;
+let dragX=0,dragY=0;
+let moving=false;
+let gameOver=false;
+let lastPocket=false;
+let soundOn=true;
+let aiTimer=null;
+let started=false;
+
+function startGame(){
+ try{
+  gameType=$("gameType").value;
+  mode=$("players").value;
+  ballStyle=$("style").value;
+  showNumbers=$("numbers").value==="yes";
+
+  $("error").textContent="";
+  $("menu").style.display="none";
+  $("game").style.display="block";
+
+  started=true;
+  newGame();
+ }catch(e){
+  $("menu").style.display="block";
+  $("game").style.display="none";
+  $("error").textContent="ERROR: "+e.message;
+ }
+}
+
+function backMenu(){
+ clearTimeout(aiTimer);
+ started=false;
+ $("game").style.display="none";
+ $("menu").style.display="block";
+}
+
+function newGame(){
+ clearTimeout(aiTimer);
+
+ balls=[];
+ score=[0,0];
+ gameOver=false;
+ moving=false;
+ dragging=false;
+ lastPocket=false;
+
+ let count=parseInt($("ballCount").value,10);
+
+ if(gameType==="8")count=Math.max(8,count);
+ if(gameType==="9")count=Math.max(9,count);
+
+ cue={
+  x:250,y:280,vx:0,vy:0,
+  color:"#ffffff",number:0,
+  type:"cue",alive:true
+ };
+ balls.push(cue);
+
+ for(let n=1;n<=count;n++){
+  let type="solid";
+
+  if(n===8)type="eight";
+  else if(ballStyle==="stripe")type="stripe";
+  else if(ballStyle==="solid")type="solid";
+  else if(ballStyle==="plain")type="plain";
+  else if(ballStyle==="checker")type="checker";
+  else if(ballStyle==="random")
+   type=Math.random()<0.5?"stripe":"checker";
+  else if(ballStyle==="mixed")
+   type=n<=7?"solid":"stripe";
+
+  if(gameType==="9" && n>9)continue;
+
+  let row=Math.floor((Math.sqrt(8*n+1)-1)/2);
+  let first=row*(row+1)/2;
+  let col=n-first-1;
+
+  balls.push({
+   x:690+row*BR*1.78,
+   y:280+(col-row/2)*BR*2.05,
+   vx:0,vy:0,
+   color:colors[(n-1)%colors.length],
+   number:n,type:type,alive:true
+  });
+ }
+
+ if(mode==="AIhuman")currentPlayer=2;
+ else if(mode==="random")
+  currentPlayer=Math.random()<0.5?1:2;
+ else currentPlayer=1;
+
+ updateInfo();
+ draw();
+
+ if(isAI())scheduleAI();
+}
+
+function isAI(){
+ return mode==="AI2" ||
+ (mode==="humanAI"&&currentPlayer===2) ||
+ (mode==="AIhuman"&&currentPlayer===1) ||
+ (mode==="random"&&currentPlayer===2);
+}
+
+function updateInfo(){
+ $("info").textContent=
+ (gameOver?"ГРУ ЗАВЕРШЕНО":"Гравець "+currentPlayer)+
+ " | Рахунок: "+score[0]+" : "+score[1];
+}
+
+function drawTable(){
+ ctx.fillStyle="#633b20";
+ ctx.fillRect(0,0,W,H);
+
+ ctx.fillStyle="#075c37";
+ ctx.fillRect(L,T,R-L,B-T);
+
+ ctx.strokeStyle="#b68b54";
+ ctx.lineWidth=8;
+ ctx.strokeRect(L,T,R-L,B-T);
+
+ for(let p of pockets){
+  ctx.beginPath();
+  ctx.fillStyle="#050505";
+  ctx.arc(p[0],p[1],PR,0,Math.PI*2);
+  ctx.fill();
+ }
+
+ ctx.strokeStyle="rgba(255,255,255,.2)";
+ ctx.lineWidth=1;
+ ctx.beginPath();
+ ctx.moveTo(500,T);
+ ctx.lineTo(500,B);
+ ctx.stroke();
+
+ ctx.beginPath();
+ ctx.arc(250,280,70,0,Math.PI*2);
+ ctx.stroke();
+}
+
+function drawBall(b){
+ if(!b.alive)return;
+
+ ctx.save();
+ ctx.translate(b.x,b.y);
+
+ ctx.beginPath();
+ ctx.arc(0,0,BR,0,Math.PI*2);
+ ctx.fillStyle=b.color;
+ ctx.fill();
+
+ if(b.type==="stripe"){
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0,0,BR,0,Math.PI*2);
+  ctx.clip();
+  ctx.fillStyle="white";
+  ctx.fillRect(-BR,-5,BR*2,10);
+  ctx.restore();
+ }
+
+ if(b.type==="checker"){
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0,0,BR,0,Math.PI*2);
+  ctx.clip();
+  ctx.fillStyle="#ffdd33";
+  ctx.fillRect(-BR,-BR,BR,BR);
+  ctx.fillRect(0,0,BR,BR);
+  ctx.restore();
+ }
+
+ if(b.type==="eight"){
+  ctx.fillStyle="#050505";
+  ctx.beginPath();
+  ctx.arc(0,0,BR,0,Math.PI*2);
+  ctx.fill();
+ }
+
+ let g=ctx.createRadialGradient(-5,-6,1,0,0,BR);
+ g.addColorStop(0,"rgba(255,255,255,.65)");
+ g.addColorStop(1,"rgba(0,0,0,.4)");
+ ctx.fillStyle=g;
+ ctx.beginPath();
+ ctx.arc(0,0,BR,0,Math.PI*2);
+ ctx.fill();
+
+ if(showNumbers&&b.number>0){
+  ctx.beginPath();
+  ctx.fillStyle="white";
+  ctx.arc(0,0,7,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="#111";
+  ctx.font="bold 9px Arial";
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  ctx.fillText(b.number,0,0);
+ }
+
+ ctx.strokeStyle="#222";
+ ctx.lineWidth=1;
+ ctx.beginPath();
+ ctx.arc(0,0,BR,0,Math.PI*2);
+ ctx.stroke();
+
+ ctx.restore();
+}
+
+function drawAim(){
+ if(!dragging||!cue||!cue.alive)return;
+
+ let dx=cue.x-dragX;
+ let dy=cue.y-dragY;
+ let len=Math.hypot(dx,dy);
+ if(len<1)return;
+
+ dx/=len;
+ dy/=len;
+
+ let power=Math.min(len,170);
+
+ ctx.strokeStyle="white";
+ ctx.lineWidth=2;
+ ctx.beginPath();
+ ctx.moveTo(cue.x,cue.y);
+ ctx.lineTo(cue.x+dx*power*2,cue.y+dy*power*2);
+ ctx.stroke();
+
+ ctx.fillStyle="white";
+ ctx.font="16px Arial";
+ ctx.fillText("POWER "+Math.round(power/170*100)+"%",65,30);
+}
+
+function draw(){
+ if(!ctx)return;
+ drawTable();
+
+ for(let b of balls)drawBall(b);
+
+ drawAim();
+}
+
+function updatePhysics(){
+ moving=false;
+
+ for(let a of balls){
+  if(!a.alive)continue;
+
+  a.x+=a.vx;
+  a.y+=a.vy;
+
+  a.vx*=0.991;
+  a.vy*=0.991;
+
+  if(Math.abs(a.vx)<0.025)a.vx=0;
+  if(Math.abs(a.vy)<0.025)a.vy=0;
+
+  if(a.vx!==0||a.vy!==0)moving=true;
+
+  if(a.x-BR<L){
+   a.x=L+BR;a.vx=Math.abs(a.vx)*0.91;
+  }
+  if(a.x+BR>R){
+   a.x=R-BR;a.vx=-Math.abs(a.vx)*0.91;
+  }
+  if(a.y-BR<T){
+   a.y=T+BR;a.vy=Math.abs(a.vy)*0.91;
+  }
+  if(a.y+BR>B){
+   a.y=B-BR;a.vy=-Math.abs(a.vy)*0.91;
+  }
+
+  for(let p of pockets){
+   let dx=a.x-p[0],dy=a.y-p[1];
+
+   if(dx*dx+dy*dy<(PR-5)*(PR-5)){
+    if(a.type==="cue"){
+     a.x=250;a.y=280;
+     a.vx=0;a.vy=0;
+    }else{
+     a.alive=false;
+     score[currentPlayer-1]++;
+     lastPocket=true;
+    }
+    break;
+   }
+  }
+ }
+
+ for(let i=0;i<balls.length;i++){
+  let a=balls[i];
+  if(!a.alive)continue;
+
+  for(let j=i+1;j<balls.length;j++){
+   let b=balls[j];
+   if(!b.alive)continue;
+
+   let dx=b.x-a.x;
+   let dy=b.y-a.y;
+   let d=Math.hypot(dx,dy);
+
+   if(d<BR*2&&d>0.001){
+    let nx=dx/d,ny=dy/d;
+    let overlap=BR*2-d;
+
+    a.x-=nx*overlap/2;
+    a.y-=ny*overlap/2;
+    b.x+=nx*overlap/2;
+    b.y+=ny*overlap/2;
+
+    let vel=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+
+    if(vel<0){
+     let impulse=-vel*0.96;
+     a.vx-=impulse*nx;
+     a.vy-=impulse*ny;
+     b.vx+=impulse*nx;
+     b.vy+=impulse*ny;
+    }
+   }
+  }
+ }
+}
+
+function allStopped(){
+ return balls.every(b=>!b.alive||
+  (Math.abs(b.vx)<=0.05&&Math.abs(b.vy)<=0.05));
+}
+
+function shoot(dx,dy,power){
+ if(moving||gameOver||isAI())return;
+
+ let len=Math.hypot(dx,dy);
+ if(len<2)return;
+
+ let speed=Math.min(power,170)*0.105;
+
+ cue.vx=dx/len*speed;
+ cue.vy=dy/len*speed;
+
+ dragging=false;
+ moving=true;
+ lastPocket=false;
+}
+
+function switchPlayer(){
+ if(!lastPocket)
+  currentPlayer=currentPlayer===1?2:1;
+
+ lastPocket=false;
+
+ let remaining=balls.filter(b=>
+  b.alive&&b.type!=="cue"&&b.number!==8
+ );
+
+ let eight=balls.find(b=>b.number===8);
+ let nine=balls.find(b=>b.number===9);
+
+ if(gameType==="8"&&remaining.length===0&&eight&&!eight.alive)
+  gameOver=true;
+
+ if(gameType==="9"&&nine&&!nine.alive)
+  gameOver=true;
+
+ if(balls.every(b=>!b.alive||b.type==="cue"))
+  gameOver=true;
+
+ updateInfo();
+
+ if(!gameOver&&isAI())scheduleAI();
+}
+
+function scheduleAI(){
+ clearTimeout(aiTimer);
+
+ aiTimer=setTimeout(()=>{
+  if(started&&!gameOver&&!moving&&isAI())
+   aiShot();
+ },800);
+}
+
+function aiShot(){
+ let targets=balls.filter(b=>b.alive&&b.type!=="cue");
+ if(!targets.length)return;
+
+ let target=targets[Math.floor(Math.random()*targets.length)];
+
+ let dx=target.x-cue.x;
+ let dy=target.y-cue.y;
+ let angle=Math.atan2(dy,dx);
+ angle+=(Math.random()-0.5)*0.20;
+
+ let power=75+Math.random()*85;
+
+ cue.vx=Math.cos(angle)*power*0.105;
+ cue.vy=Math.sin(angle)*power*0.105;
+
+ moving=true;
+ lastPocket=false;
+}
+
+function gameLoop(){
+ if(started&&moving){
+  updatePhysics();
+
+  if(allStopped()){
+   moving=false;
+   switchPlayer();
+  }
+ }
+
+ if(started)draw();
+
+ requestAnimationFrame(gameLoop);
+}
+
+function pointerPosition(e){
+ let r=canvas.getBoundingClientRect();
+
+ return {
+  x:(e.clientX-r.left)*W/r.width,
+  y:(e.clientY-r.top)*H/r.height
+ };
+}
+
+function pointerDown(e){
+ if(!started||moving||gameOver||isAI())return;
+
+ let p=pointerPosition(e);
+ let dx=p.x-cue.x;
+ let dy=p.y-cue.y;
+
+ if(dx*dx+dy*dy<BR*BR*9){
+  dragging=true;
+  dragX=p.x;
+  dragY=p.y;
+
+  if(canvas.setPointerCapture)
+   canvas.setPointerCapture(e.pointerId);
+ }
+}
+
+function pointerMove(e){
+ if(!dragging)return;
+
+ let p=pointerPosition(e);
+ dragX=p.x;
+ dragY=p.y;
+ draw();
+}
+
+function pointerUp(e){
+ if(!dragging)return;
+
+ let dx=cue.x-dragX;
+ let dy=cue.y-dragY;
+ let power=Math.hypot(dx,dy);
+
+ dragging=false;
+ shoot(dx,dy,power);
+ draw();
+}
+
+canvas.addEventListener("pointerdown",pointerDown);
+canvas.addEventListener("pointermove",pointerMove);
+canvas.addEventListener("pointerup",pointerUp);
+canvas.addEventListener("pointercancel",()=>{
+ dragging=false;
+});
+
+$("startBtn").addEventListener("click",startGame);
+$("newBtn").addEventListener("click",newGame);
+$("menuBtn").addEventListener("click",backMenu);
+
+$("soundBtn").addEventListener("click",()=>{
+ soundOn=!soundOn;
+ let m=$("music");
+
+ if(!soundOn)m.pause();
+ else if(m.src)m.play().catch(()=>{});
+});
+
+$("musicFile").addEventListener("change",function(){
+ let f=this.files[0];
+ if(!f)return;
+
+ let m=$("music");
+ m.src=URL.createObjectURL(f);
+
+ if(soundOn)m.play().catch(()=>{});
+});
+
+window.addEventListener("error",function(e){
+ $("error").textContent="JAVASCRIPT ERROR: "+e.message;
+});
+
+gameLoop();
+
+</script>
+</body>
+</html>
+  
