@@ -1,0 +1,648 @@
+       <!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0e0e12">
+<title>Шахи 7×7 — Червоні проти Синіх</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden}
+  body{
+    display:flex;flex-direction:column;background:#0e0e12;color:#e8e8ee;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    user-select:none;-webkit-user-select:none;touch-action:manipulation;
+  }
+  #boards{flex:1;display:flex;flex-direction:column;gap:6px;padding:6px;min-height:0}
+  .boardWrap{flex:1 1 0;min-height:0;min-width:0;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;border-radius:6px}
+  @media (min-width:700px){
+    #boards{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+    .boardWrap{flex:none}
+  }
+  #hud{background:#1a1a22;border-top:1px solid #2c2c38;padding:6px 8px calc(6px + env(safe-area-inset-bottom))}
+  .r1{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;font-size:14px;margin-bottom:6px}
+  #turnInfo{font-weight:700;padding:3px 12px;border-radius:999px;background:#26263a;transition:background .2s}
+  #turnInfo.red{background:#e03131;color:#fff}
+  #turnInfo.blue{background:#1c7ed6;color:#fff}
+  #turnInfo.over{background:#ffd43b;color:#1a1a22}
+  .stat{opacity:.9}
+  .stat b{color:#ffd43b}
+  .r2{display:flex;gap:8px}
+  button{
+    flex:1;padding:11px 6px;font-size:15px;font-weight:600;border-radius:10px;
+    border:1px solid #3a3a4a;background:#26263a;color:#e8e8ee;cursor:pointer;
+    font-family:inherit;
+  }
+  button:active{background:#34344c}
+  button:disabled{opacity:.4}
+  #btnNew{background:#3a1e1e;border-color:#5c2a2a}
+  #btnNew .num{display:inline-block;min-width:24px;padding:0 6px;margin-left:4px;border-radius:8px;background:#e03131;color:#fff;text-align:center}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:50}
+  .hidden{display:none !important}
+  .panel{background:#1e1e2a;border:1px solid #3a3a4a;border-radius:14px;padding:16px;width:min(340px,90vw);text-align:center}
+  .panel h3{margin:0 0 12px;font-size:17px}
+  .panel .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .panel .row button{flex:1 1 45%}
+</style>
+</head>
+<body>
+
+<div id="boards"></div>
+
+<div id="hud">
+  <div class="r1">
+    <div id="turnInfo">Ходять ЧЕРВОНІ</div>
+    <div class="stat">Очки: <b id="score">0</b></div>
+    <div class="stat">Без зїдань: <b id="noCap">0</b></div>
+  </div>
+  <div class="r2">
+    <button id="btnUndo">◀ Назад</button>
+    <button id="btnRedo">Вперед ▶</button>
+    <button id="btnNew">Нова гра <span class="num">11</span></button>
+  </div>
+</div>
+
+<div id="promoOverlay" class="overlay hidden">
+  <div class="panel">
+    <h3 id="promoTitle">Оберіть фігуру</h3>
+    <div class="row" id="promoPieces">
+      <button data-type="N">Кінь</button>
+      <button data-type="B">Слон</button>
+      <button data-type="R">Тура</button>
+    </div>
+    <div class="row hidden" id="promoPos"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ======================= КОНСТАНТИ ======================= */
+const N = 7;                              // дошка 7×7
+const VALUES = { K:55, R:5, B:3, N:3, P:1 };
+
+// 4 теми клітинок
+const THEMES = [
+  { light:'#f3e07a', dark:'#c9c9c9' },   // жовті / світло-сірі
+  { light:'#e2ec8e', dark:'#8ecfc4' },   // світло-зеленожовті / світло-синезелені
+  { light:'#ffcf9a', dark:'#c69a72' },   // світло-оранжеві / світло-коричневі
+  { light:'#f7c4dd', dark:'#c3aae8' }    // світло-рожеві / світло-фіолетові
+];
+
+/* ======================= СТАН ======================= */
+let boards = [];
+let history = [];
+let hi = -1;
+let sel = null;
+let legalMoves = [];
+let pendingPromo = null;
+let promoType = null;
+
+const clone = o => JSON.parse(JSON.stringify(o));
+
+function makeInitialState(){
+  const board = Array.from({length:N}, () => Array(N).fill(null));
+  const back = ['R','N','B','K','B','N','R'];
+  for(let c=0;c<N;c++){
+    board[0][c]     = { t: back[c], color:'blue' };
+    board[1][c]     = { t:'P',     color:'blue' };
+    board[N-2][c]   = { t:'P',     color:'red'  };
+    board[N-1][c]   = { t: back[c], color:'red'  };
+  }
+  return { board, turn:'red', score:0, noCap:0, over:false, winner:null, lastMove:null };
+}
+
+function getState(){ return history[hi]; }
+
+function pushState(s){
+  history = history.slice(0, hi+1);
+  history.push(s);
+  hi = history.length - 1;
+}
+
+function newGame(){
+  history = [ makeInitialState() ];
+  hi = 0;
+  sel = null; legalMoves = [];
+  pendingPromo = null; promoType = null;
+  document.getElementById('promoOverlay').classList.add('hidden');
+  render();
+}
+
+/* ======================= РУХИ ======================= */
+const inB = (r,c) => r>=0 && r<N && c>=0 && c<N;
+
+function pseudoMoves(board, r, c){
+  const p = board[r][c];
+  if(!p) return [];
+  const res = [];
+  const dir = p.color === 'red' ? -1 : 1;
+  const own = (rr,cc) => board[rr][cc] && board[rr][cc].color === p.color;
+  const add = (rr,cc) => { if(inB(rr,cc) && !own(rr,cc)) res.push({r:rr,c:cc}); };
+
+  switch(p.t){
+    case 'P': {
+      const fr = r + dir;
+      if(inB(fr,c) && !board[fr][c]) res.push({r:fr, c});
+      for(const dc of [-1,1]){
+        const cc = c + dc;
+        if(inB(fr,cc) && board[fr][cc] && board[fr][cc].color !== p.color)
+          res.push({r:fr, c:cc});
+      }
+      break;
+    }
+    case 'N': {
+      for(const [dr,dc] of [[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]])
+        add(r+dr, c+dc);
+      break;
+    }
+    case 'B': {
+      for(const [dr,dc] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+        let rr=r+dr, cc=c+dc;
+        while(inB(rr,cc)){
+          if(board[rr][cc]){
+            if(board[rr][cc].color !== p.color) res.push({r:rr,c:cc});
+            break;
+          }
+          res.push({r:rr,c:cc});
+          rr+=dr; cc+=dc;
+        }
+      }
+      break;
+    }
+    case 'R': {
+      for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        let rr=r+dr, cc=c+dc;
+        while(inB(rr,cc)){
+          if(board[rr][cc]){
+            if(board[rr][cc].color !== p.color) res.push({r:rr,c:cc});
+            break;
+          }
+          res.push({r:rr,c:cc});
+          rr+=dr; cc+=dc;
+        }
+      }
+      break;
+    }
+    case 'K': {
+      for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++)
+        if(dr||dc) add(r+dr, c+dc);
+      break;
+    }
+  }
+  return res;
+}
+
+/* ======================= ВИКОНАННЯ ХОДУ ======================= */
+function makeMove(from, to){
+  const s = clone(getState());
+  const p = s.board[from.r][from.c];
+  const target = s.board[to.r][to.c];
+
+  s.board[from.r][from.c] = null;
+
+  if(target){
+    const v = VALUES[target.t];
+    s.score += (p.color === 'red' ? v : -v);
+    s.noCap = 0;
+  } else {
+    s.noCap += 1;
+  }
+
+  s.board[to.r][to.c] = p;
+  s.lastMove = { from, to };
+
+  // ---- з'їли короля: усі фігури його кольору зникають ----
+  if(target && target.t === 'K'){
+    for(let r=0;r<N;r++) for(let c=0;c<N;c++){
+      const q = s.board[r][c];
+      if(q && q.color === target.color){
+        const vv = VALUES[q.t];
+        s.score += (p.color === 'red' ? vv : -vv);
+        s.board[r][c] = null;
+      }
+    }
+    s.over = true;
+    s.winner = p.color;
+  } else {
+    s.turn = (p.color === 'red') ? 'blue' : 'red';
+  }
+
+  sel = null; legalMoves = [];
+
+  // ---- перевірка перетворення пішки ----
+  let promoNeeded = false;
+  if(!s.over && p.t === 'P'){
+    const lastR = (p.color === 'red') ? 0 : N-1;
+    if(to.r === lastR) promoNeeded = true;
+  }
+
+  pushState(s);
+
+  if(promoNeeded){
+    const dir      = (p.color === 'red') ? -1 : 1;
+    const ownHome  = (p.color === 'red') ? N-1 : 0;
+    const options  = [ { r:to.r, c:to.c, kind:'last' } ];
+
+    const pr = to.r - dir; // передостання клітинка
+    if(inB(pr, to.c) && !s.board[pr][to.c])
+      options.push({ r:pr, c:to.c, kind:'prev' });
+
+    if(ownHome !== to.r && !s.board[ownHome][to.c] &&
+       !options.some(o => o.r === ownHome && o.c === to.c))
+      options.push({ r:ownHome, c:to.c, kind:'home' });
+
+    pendingPromo = { r:to.r, c:to.c, color:p.color, options };
+    showPromoUI();
+  }
+
+  render();
+}
+
+/* ======================= ПЕРЕТВОРЕННЯ ПІШКИ ======================= */
+function showPromoUI(){
+  promoType = null;
+  document.getElementById('promoTitle').textContent = 'Оберіть фігуру';
+  document.getElementById('promoPieces').classList.remove('hidden');
+  const box = document.getElementById('promoPos');
+  box.innerHTML = '';
+  box.classList.add('hidden');
+  document.getElementById('promoOverlay').classList.remove('hidden');
+}
+
+function resolvePromotion(type, pos){
+  const s = clone(getState());
+  s.board[pendingPromo.r][pendingPromo.c] = null;
+  s.board[pos.r][pos.c] = { t:type, color: pendingPromo.color };
+  history[hi] = s;
+  pendingPromo = null;
+  document.getElementById('promoOverlay').classList.add('hidden');
+  render();
+}
+
+document.getElementById('promoPieces').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if(!b || !pendingPromo) return;
+  promoType = b.dataset.type;
+  const opts = pendingPromo.options;
+
+  if(opts.length === 1){
+    resolvePromotion(promoType, opts[0]);
+    return;
+  }
+
+  const labels = { last:'Остання клітинка', prev:'Передостання', home:'Свій перший ряд' };
+  const box = document.getElementById('promoPos');
+  box.innerHTML = '';
+  opts.forEach(o => {
+    const btn = document.createElement('button');
+    btn.textContent = labels[o.kind] || 'Клітинка';
+    btn.onclick = () => resolvePromotion(promoType, o);
+    box.appendChild(btn);
+  });
+  box.classList.remove('hidden');
+  document.getElementById('promoPieces').classList.add('hidden');
+  document.getElementById('promoTitle').textContent = 'Оберіть клітинку';
+});
+
+/* ======================= МАЛЮВАННЯ ФІГУР ======================= */
+function drawPiece(ctx, type, color, x, y, s){
+  const fill = color === 'red' ? '#d62828' : '#1c4fd6';
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = fill;
+  const cx = s/2, cy = s/2;
+
+  if(type === 'R'){                       // тура — хрест «+»
+    const bw = s*0.62, bh = s*0.22;
+    ctx.fillRect(cx-bw/2, cy-bh/2, bw, bh);
+    ctx.fillRect(cx-bh/2, cy-bw/2, bh, bw);
+
+  } else if(type === 'B'){                // слон — 4 квадрати по кутах
+    const q = s*0.26, o = s*0.10;
+    ctx.fillRect(o,       o,       q, q);
+    ctx.fillRect(s-o-q,   o,       q, q);
+    ctx.fillRect(o,       s-o-q,   q, q);
+    ctx.fillRect(s-o-q,   s-o-q,   q, q);
+
+  } else if(type === 'N'){                // кінь — великий круг + чорний менший
+    ctx.beginPath();
+    ctx.arc(cx, cy, s*0.30, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + s*0.18, cy + s*0.18, s*0.11, 0, Math.PI*2);
+    ctx.fillStyle = '#000';
+    ctx.fill();
+
+  } else if(type === 'P'){                // пішка — трикутник
+    ctx.beginPath();
+    ctx.moveTo(cx, s*0.15);
+    ctx.lineTo(s*0.82, s*0.85);
+    ctx.lineTo(s*0.18, s*0.85);
+    ctx.closePath();
+    ctx.fill();
+
+  } else if(type === 'K'){                // король — квадрат + чорний менший
+    const q = s*0.62;
+    ctx.fillRect(cx-q/2, cy-q/2, q, q);
+    const q2 = s*0.28;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx-q2/2, cy-q2/2, q2, q2);
+  }
+  ctx.restore();
+}
+
+/* ======================= ГЕОМЕТРІЯ ======================= */
+function geom(size){
+  const pad  = Math.max(12, size*0.095);
+  const cell = (size - pad) / N;
+  const ox   = pad;
+  const oy   = (size - cell*N) / 2;
+  return { pad, cell, ox, oy };
+}
+
+/* ======================= МАЛЮВАННЯ ДОШКИ ======================= */
+function drawTurnArrow(ctx, pad, boardH, oy, turn){
+  const cx  = pad * 0.5;
+  const len = boardH * 0.62;
+  const cy  = oy + boardH/2;
+  const color = turn === 'red' ? '#e03131' : '#1c7ed6';
+  const dir = turn === 'red' ? -1 : 1;      // червоні йдуть вгору, сині вниз
+  const y1 = cy - dir*len/2;                // хвіст
+  const y2 = cy + dir*len/2;                // вістря
+  const lw = Math.max(2, pad*0.32);
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+
+  ctx.beginPath();
+  ctx.moveTo(cx, y1);
+  ctx.lineTo(cx, y2 - dir*lw*0.9);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(cx, y2);
+  ctx.lineTo(cx - pad*0.42, y2 - dir*pad*0.55);
+  ctx.lineTo(cx + pad*0.42, y2 - dir*pad*0.55);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawTo(bd){
+  const size = bd.size;
+  if(!size || size < 40) return;
+
+  const ctx = bd.canvas.getContext('2d');
+  ctx.setTransform(bd.dpr, 0, 0, bd.dpr, 0, 0);
+  ctx.clearRect(0, 0, size, size);
+
+  const { pad, cell, ox, oy } = geom(size);
+  const th = bd.theme;
+  const s  = getState();
+
+  // рамка в колір того, хто ходить
+  ctx.fillStyle = '#1b1b22';
+  ctx.fillRect(0, 0, size, size);
+
+  // клітинки
+  for(let r=0;r<N;r++) for(let c=0;c<N;c++){
+    ctx.fillStyle = ((r+c) % 2 === 0) ? th.light : th.dark;
+    ctx.fillRect(ox + c*cell, oy + r*cell, cell, cell);
+  }
+
+  // виділення
+  if(sel && !s.over){
+    ctx.fillStyle = 'rgba(255,230,0,0.50)';
+    ctx.fillRect(ox + sel.c*cell, oy + sel.r*cell, cell, cell);
+  }
+
+  // можливі ходи
+  if(sel && !s.over){
+    for(const m of legalMoves){
+      const x = ox + m.c*cell + cell/2;
+      const y = oy + m.r*cell + cell/2;
+      ctx.beginPath();
+      ctx.arc(x, y, cell*0.15, 0, Math.PI*2);
+      ctx.fillStyle = s.board[m.r][m.c] ? 'rgba(220,0,0,0.70)' : 'rgba(0,0,0,0.40)';
+      ctx.fill();
+    }
+  }
+
+  // фігури
+  for(let r=0;r<N;r++) for(let c=0;c<N;c++){
+    const p = s.board[r][c];
+    if(p) drawPiece(ctx, p.t, p.color, ox + c*cell, oy + r*cell, cell);
+  }
+
+  // сітка
+  ctx.strokeStyle = 'rgba(0,0,0,0.30)';
+  ctx.lineWidth = 1;
+  for(let i=0;i<=N;i++){
+    ctx.beginPath(); ctx.moveTo(ox + i*cell, oy); ctx.lineTo(ox + i*cell, oy + cell*N); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ox, oy + i*cell); ctx.lineTo(ox + cell*N, oy + i*cell); ctx.stroke();
+  }
+
+  // рамка
+  ctx.strokeStyle = s.over ? '#ffd43b' : (s.turn === 'red' ? '#e03131' : '#1c7ed6');
+  ctx.lineWidth = Math.max(2, cell*0.06);
+  ctx.strokeRect(ox, oy, cell*N, cell*N);
+
+  // стрілка — хто ходить
+  drawTurnArrow(ctx, pad, cell*N, oy, s.over ? (s.winner || 'red') : s.turn);
+}
+
+/* ======================= РЕНДЕР ======================= */
+function render(){
+  for(const bd of boards) drawTo(bd);
+  updateUI();
+}
+
+function updateUI(){
+  const s = getState();
+  const t = document.getElementById('turnInfo');
+
+  if(s.over){
+    t.textContent = s.winner === 'red' ? 'ПЕРЕМОГА ЧЕРВОНИХ' : 'ПЕРЕМОГА СИНІХ';
+    t.className = 'over';
+  } else if(s.turn === 'red'){
+    t.textContent = 'Ходять ЧЕРВОНІ';
+    t.className = 'red';
+  } else {
+    t.textContent = 'Ходять СИНІ';
+    t.className = 'blue';
+  }
+
+  const sc = s.score;
+  document.getElementById('score').textContent = (sc > 0 ? '+' : '') + sc;
+  document.getElementById('noCap').textContent = s.noCap;
+
+  document.getElementById('btnUndo').disabled = (hi <= 0) || !!pendingPromo;
+  document.getElementById('btnRedo').disabled = (hi >= history.length-1) || !!pendingPromo;
+}
+
+/* ======================= ДОШКИ ======================= */
+function boardCount(){
+  return window.innerWidth >= 700 ? 4 : 2;
+}
+
+function buildBoards(){
+  const n = boardCount();
+  const cont = document.getElementById('boards');
+
+  if(boards.length === n){
+    layoutBoards();
+    return;
+  }
+
+  cont.innerHTML = '';
+  boards = [];
+
+  for(let i=0;i<n;i++){
+    const wrap = document.createElement('div');
+    wrap.className = 'boardWrap';
+    const cv = document.createElement('canvas');
+    wrap.appendChild(cv);
+    cont.appendChild(wrap);
+
+    const bd = {
+      wrap, canvas: cv,
+      theme: THEMES[i % THEMES.length],
+      size: 0, dpr: 1
+    };
+    cv.addEventListener('click', ev => onCanvasClick(bd, ev));
+    boards.push(bd);
+  }
+  layoutBoards();
+}
+
+function layoutBoards(){
+  for(const bd of boards){
+    const w = bd.wrap.clientWidth;
+    const h = bd.wrap.clientHeight;
+    const size = Math.floor(Math.min(w, h));
+    if(size < 40) continue;
+    bd.size = size;
+    bd.dpr = Math.min(window.devicePixelRatio || 1, 3);
+    bd.canvas.width  = Math.round(size * bd.dpr);
+    bd.canvas.height = Math.round(size * bd.dpr);
+    bd.canvas.style.width  = size + 'px';
+    bd.canvas.style.height = size + 'px';
+  }
+  render();
+}
+
+/* ======================= КЛІК ПО ДОШЦІ ======================= */
+function onCanvasClick(bd, ev){
+  if(pendingPromo) return;
+  const s = getState();
+  if(s.over || !bd.size) return;
+
+  const rect = bd.canvas.getBoundingClientRect();
+  const x = (ev.clientX - rect.left) * (bd.size / rect.width);
+  const y = (ev.clientY - rect.top)  * (bd.size / rect.height);
+
+  const { cell, ox, oy } = geom(bd.size);
+  const c = Math.floor((x - ox) / cell);
+  const r = Math.floor((y - oy) / cell);
+  if(r < 0 || r >= N || c < 0 || c >= N) return;
+
+  // хід на підсвічену клітинку
+  if(sel && legalMoves.some(m => m.r === r && m.c === c)){
+    makeMove(sel, {r, c});
+    return;
+  }
+
+  const p = s.board[r][c];
+  if(p && p.color === s.turn){
+    sel = {r, c};
+    legalMoves = pseudoMoves(s.board, r, c);
+  } else {
+    sel = null;
+    legalMoves = [];
+  }
+  render();
+}
+
+/* ======================= КНОПКИ ======================= */
+document.getElementById('btnUndo').addEventListener('click', () => {
+  if(pendingPromo || hi <= 0) return;
+  hi--; sel = null; legalMoves = [];
+  render();
+});
+
+document.getElementById('btnRedo').addEventListener('click', () => {
+  if(pendingPromo || hi >= history.length-1) return;
+  hi++; sel = null; legalMoves = [];
+  render();
+});
+
+/* Нова гра — треба натиснути 11 разів, цифра скидається через 5 с */
+let ngCounter = 11;
+let ngTimer = null;
+const ngBtn = document.getElementById('btnNew');
+const ngNum = ngBtn.querySelector('.num');
+
+ngBtn.addEventListener('click', () => {
+  if(ngTimer){ clearTimeout(ngTimer); ngTimer = null; }
+
+  ngCounter--;
+
+  if(ngCounter <= 0){
+    ngCounter = 11;
+    ngNum.textContent = '11';
+    newGame();
+    return;
+  }
+
+  ngNum.textContent = String(ngCounter);
+  ngTimer = setTimeout(() => {
+    ngCounter = 11;
+    ngNum.textContent = '11';
+    ngTimer = null;
+  }, 5000);
+});
+
+/* ======================= RESIZE ======================= */
+function onResize(){
+  if(boardCount() !== boards.length) buildBoards();
+  else layoutBoards();
+}
+window.addEventListener('resize', onResize);
+window.addEventListener('orientationchange', () => setTimeout(onResize, 250));
+
+/* ======================= СТАРТ ======================= */
+newGame();
+buildBoards();
+setTimeout(layoutBoards, 60);
+
+})();
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
