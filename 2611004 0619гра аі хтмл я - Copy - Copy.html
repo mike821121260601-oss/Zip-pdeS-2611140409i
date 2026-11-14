@@ -1,0 +1,234 @@
+       <!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>21×21 Гра для родичів</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.3/p5.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #111; overflow: hidden; font-family: sans-serif; }
+    canvas { display: block; margin: 0 auto; }
+  </style>
+</head>
+<body>
+<script>
+let cols = 21;
+let rows = 21;
+let grid = [];
+let cellSize;
+let scores = [0, 0, 0, 0]; // 0=немає, 1=червоний, 2=синій, 3=людина
+let floatingTexts = [];
+
+let currentPlayer = 1;          // 1=червоний (комп), 2=синій (комп)
+let turnStartTime = 0;
+let turnDuration = 4000;        // 4 секунди
+let humanMovedThisTurn = false;
+let gameStarted = false;
+let lastPlacementTime = 0;
+
+function setup() {
+  let size = min(windowWidth - 10, windowHeight - 10);
+  cellSize = floor(size / cols);
+  createCanvas(cols * cellSize, rows * cellSize + 70);
+  
+  for (let y = 0; y < rows; y++) {
+    grid[y] = [];
+    for (let x = 0; x < cols; x++) {
+      grid[y][x] = 0;
+    }
+  }
+  
+  textAlign(CENTER, CENTER);
+  turnStartTime = millis();
+  gameStarted = true;
+}
+
+function draw() {
+  background(25);
+  
+  // ===== ПОЛЕ =====
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      // фон клітинок
+      if ((x + y) % 2 === 0) fill(255, 225, 110);
+      else fill(195, 195, 205);
+      noStroke();
+      rect(x * cellSize, y * cellSize, cellSize, cellSize);
+      
+      // фігури
+      let val = grid[y][x];
+      if (val === 1) { // червоний комп
+        fill(220, 50, 50);
+        ellipse(x * cellSize + cellSize/2, y * cellSize + cellSize/2, cellSize * 0.72);
+      } 
+      else if (val === 2) { // синій комп
+        fill(50, 110, 230);
+        ellipse(x * cellSize + cellSize/2, y * cellSize + cellSize/2, cellSize * 0.72);
+      } 
+      else if (val === 3) { // людина: зелений + фіолетовий
+        fill(40, 190, 90);
+        ellipse(x * cellSize + cellSize/2, y * cellSize + cellSize/2, cellSize * 0.78);
+        fill(160, 60, 220);
+        ellipse(x * cellSize + cellSize/2, y * cellSize + cellSize/2, cellSize * 0.38);
+      }
+    }
+  }
+  
+  // ===== ПЛАВАЮЧІ ТЕКСТИ =====
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    let t = floatingTexts[i];
+    fill(t.col);
+    noStroke();
+    textSize(17);
+    textStyle(BOLD);
+    text(t.txt, t.x, t.y);
+    t.y -= 1.1;
+    t.life--;
+    if (t.life <= 0) floatingTexts.splice(i, 1);
+  }
+  
+  // ===== ІНФОРМАЦІЙНА ПАНЕЛЬ =====
+  fill(20);
+  rect(0, rows * cellSize, width, 70);
+  
+  let timeLeft = max(0, turnDuration - (millis() - turnStartTime));
+  let sec = (timeLeft / 1000).toFixed(1);
+  
+  // Хто ходить
+  textSize(16);
+  textAlign(LEFT, CENTER);
+  if (currentPlayer === 1) {
+    fill(255, 90, 90);
+    text("Хід: ЧЕРВОНИЙ (комп'ютер)", 12, rows * cellSize + 22);
+  } else {
+    fill(90, 150, 255);
+    text("Хід: СИНІЙ (комп'ютер)", 12, rows * cellSize + 22);
+  }
+  
+  // Таймер
+  textAlign(CENTER, CENTER);
+  fill(255);
+  textSize(20);
+  text(sec + " с", width/2, rows * cellSize + 22);
+  
+  // Рахунок
+  textAlign(RIGHT, CENTER);
+  textSize(14);
+  fill(255, 90, 90);
+  text("Ч " + scores[1], width - 12, rows * cellSize + 16);
+  fill(90, 150, 255);
+  text("С " + scores[2], width - 12, rows * cellSize + 34);
+  fill(80, 220, 120);
+  text("Ти " + scores[3], width - 12, rows * cellSize + 52);
+  
+  // Підказка
+  textAlign(LEFT, CENTER);
+  textSize(12);
+  fill(180);
+  if (!humanMovedThisTurn) {
+    text("Клікни один раз, щоб походити", 12, rows * cellSize + 48);
+  } else {
+    text("Ти вже походив у цьому ході", 12, rows * cellSize + 48);
+  }
+  
+  // ===== ЛОГІКА ХОДІВ КОМП'ЮТЕРІВ =====
+  if (gameStarted && millis() - turnStartTime >= turnDuration) {
+    // час вийшов — комп'ютер робить свій випадковий хід
+    doComputerMove(currentPlayer);
+    
+    // перехід до наступного
+    currentPlayer = currentPlayer === 1 ? 2 : 1;
+    turnStartTime = millis();
+    humanMovedThisTurn = false;
+    
+    // невелика випадковість часу ходу (як ти просив)
+    turnDuration = 2800 + random(2200); // від \~2.8 до 5 секунд
+  }
+}
+
+function mousePressed() {
+  if (!gameStarted) return;
+  if (humanMovedThisTurn) return; // тільки 1 раз за 4 секунди
+  
+  let x = floor(mouseX / cellSize);
+  let y = floor(mouseY / cellSize);
+  
+  if (x >= 0 && x < cols && y >= 0 && y < rows && grid[y][x] === 0) {
+    // людина ставить свою фігуру
+    grid[y][x] = 3;
+    humanMovedThisTurn = true;
+    
+    let gained = evaluateSimple(x, y, 3);
+    scores[3] += gained;
+    
+    floatingTexts.push({
+      x: x * cellSize + cellSize/2,
+      y: y * cellSize + cellSize/2,
+      txt: (gained >= 0 ? "+" : "") + gained,
+      col: color(100, 255, 140),
+      life: 80
+    });
+  }
+}
+
+function doComputerMove(player) {
+  let empty = [];
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      if (grid[y][x] === 0) empty.push({x, y});
+    }
+  }
+  if (empty.length === 0) return;
+  
+  let pick = random(empty);
+  grid[pick.y][pick.x] = player;
+  
+  let gained = evaluateSimple(pick.x, pick.y, player);
+  if (player === 1) scores[1] += gained;
+  else scores[2] += gained;
+  
+  floatingTexts.push({
+    x: pick.x * cellSize + cellSize/2,
+    y: pick.y * cellSize + cellSize/2,
+    txt: (gained >= 0 ? "+" : "") + gained,
+    col: player === 1 ? color(255, 100, 100) : color(100, 160, 255),
+    life: 70
+  });
+}
+
+// Простий підрахунок (горизонт + вертикаль + діагоналі)
+function evaluateSimple(x, y, player) {
+  let total = 0;
+  let dirs = [[1,0],[0,1],[1,1],[1,-1]];
+  
+  for (let [dx, dy] of dirs) {
+    let count = 1;
+    count += countDir(x, y, dx, dy, player);
+    count += countDir(x, y, -dx, -dy, player);
+    
+    if (count >= 4) total += count * count;
+  }
+  return total;
+}
+
+function countDir(x, y, dx, dy, player) {
+  let c = 0;
+  let cx = x + dx;
+  let cy = y + dy;
+  while (cx >= 0 && cx < cols && cy >= 0 && cy < rows && grid[cy][cx] === player) {
+    c++;
+    cx += dx;
+    cy += dy;
+  }
+  return c;
+}
+
+function windowResized() {
+  let size = min(windowWidth - 10, windowHeight - 10);
+  cellSize = floor(size / cols);
+  resizeCanvas(cols * cellSize, rows * cellSize + 70);
+}
+</script>
+</body>
+</html>   
