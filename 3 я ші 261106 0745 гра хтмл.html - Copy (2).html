@@ -1,0 +1,1041 @@
+       <!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Неоновий футбол — сенсорне керування</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#05060a; }
+  canvas { display:block; position:fixed; inset:0; touch-action:none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+(function () {
+'use strict';
+
+/* ============================================================
+   КОНСТАНТИ
+   ============================================================ */
+const BALL_R     = 13;
+const PLAYER_R   = 36;
+const GOAL_R     = 95;
+const BALL_MIN   = 400;
+const BALL_MAX   = 500;
+const PLAYER_MAX = 333;
+const PLAYER_ROT = Math.PI / 180;      // 1°/с (ШІ)
+const HUMAN_ROT  = 2.6;                // рад/с для кнопок кута
+const SQ_ROT     = 10 * Math.PI / 180; // 10°/с
+const SECTORS    = 11;
+const SQ_COUNT   = 99;
+const SAVE_KEY   = 'neon-football-v2';
+
+/* ============================================================
+   УТІЛІТИ
+   ============================================================ */
+const rand  = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => (v < a ? a : (v > b ? b : v));
+const dist  = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const lightColor = () =>
+  'hsl(' + Math.floor(rand(0, 360)) + ',100%,' + Math.floor(rand(62, 88)) + '%)';
+
+/* ============================================================
+   СТАН
+   ============================================================ */
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+
+let W = 1, H = 1;
+let ball, red, blue;
+let squares  = [];
+let scoreRed = 0, scoreBlue = 0;
+let state    = 'play';
+let pauseT   = 0;
+let labels   = [];
+let humanRed = false;
+let saveT    = 0;
+
+const keys = {};
+let mouseX = -1, mouseY = -1;
+
+/* ввід */
+const pointerRoles = new Map();   // pointerId -> 'ccw' | 'cw' | 'toggle' | 'drag' | 'rot' | 'joy'
+let btnCCW = false, btnCW = false;
+let drag = { active: false, x: 0, y: 0, id: null };
+let joy  = { active: false, dx: 0, dy: 0, id: null };
+
+/* ============================================================
+   РОЗМІР
+   ============================================================ */
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(320, window.innerWidth);
+  H = Math.max(240, window.innerHeight);
+  canvas.width  = Math.floor(W * dpr);
+  canvas.height = Math.floor(H * dpr);
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+/* ============================================================
+   ПОЗИЦІЇ КНОПОК
+   ============================================================ */
+function getButtons() {
+  const small = Math.min(W, 500) < 380;
+  const rTop  = small ? 28 : 32;
+  const rJoy  = small ? 54 : 62;
+  return {
+    ccw:    { x: W/2 - (small ? 86 : 104), y: 58, r: rTop },
+    toggle: { x: W/2,                      y: 58, r: rTop - 2 },
+    cw:     { x: W/2 + (small ? 86 : 104), y: 58, r: rTop },
+    joy:    { x: W/2, y: H - (small ? 92 : 108), r: rJoy, actR: rJoy * 1.75 }
+  };
+}
+
+/* ============================================================
+   ГРАВЦІ
+   ============================================================ */
+function makePlayer(side) {
+  const sectors = [];
+  for (let i = 0; i < SECTORS; i++) {
+    sectors.push({
+      color:    'hsl(' + Math.floor(rand(0, 360)) + ',95%,' + Math.floor(rand(50, 68)) + '%)',
+      speedMul: 0.95 + Math.random() * 0.10,
+      angleOff: (Math.random() * 2 - 1) * 5  * Math.PI / 180
+              + (Math.random() * 2 - 1) * 50 * Math.PI / 180
+    });
+  }
+  return {
+    side,
+    x: 0, y: 0, vx: 0, vy: 0,
+    angle: Math.random() * Math.PI * 2,
+    sectors, flash: 0,
+    tx: 0, ty: 0
+  };
+}
+
+/* квадрати — радіус (півсторона) збільшено вдвічі: 10..22 */
+function buildSquares() {
+  squares = [];
+  const rw = W / 3, rh = H / 3;
+  const x0 = W / 2 - rw / 2, y0 = H / 2 - rh / 2;
+  for (let i = 0; i < SQ_COUNT; i++) {
+    squares.push({
+      x: x0 + Math.random() * rw,
+      y: y0 + Math.random() * rh,
+      s: rand(10, 22),
+      a: Math.random() * Math.PI * 2,
+      color: 'hsl(' + Math.floor(rand(175, 320)) + ',100%,' + Math.floor(rand(45, 72)) + '%)'
+    });
+  }
+}
+
+function makeLabels() {
+  labels = [
+    { side: -1, x: 90,     y: 80, vx: 0, vy: 0, color: lightColor(), t: 0 },
+    { side:  1, x: W - 90, y: 80, vx: 0, vy: 0, color: lightColor(), t: 0 }
+  ];
+  for (const l of labels) {
+    const a = rand(0, Math.PI * 2);
+    const s = rand(35, 75);
+    l.vx = Math.cos(a) * s;
+    l.vy = Math.sin(a) * s;
+  }
+}
+
+/* ============================================================
+   ІНІЦІАЛІЗАЦІЯ
+   ============================================================ */
+function initGame() {
+  scoreRed = 0;
+  scoreBlue = 0;
+  humanRed = false;
+  red  = makePlayer(-1);
+  blue = makePlayer( 1);
+  ball = { x: W / 2, y: H / 2, vx: 0, vy: 0, r: BALL_R };
+  buildSquares();
+  makeLabels();
+  state = 'play';
+  pauseT = 0;
+  resetPositions();
+  clearInput();
+}
+
+function resetPositions() {
+  red.x  = PLAYER_R + 14;   red.y  = H / 2;   red.vx = red.vy = 0;
+  blue.x = W - PLAYER_R - 14; blue.y = H / 2; blue.vx = blue.vy = 0;
+  ball.x = W / 2;
+  ball.y = H / 2;
+  const a  = Math.random() * Math.PI * 2;
+  const sp = rand(430, 490);
+  ball.vx = Math.cos(a) * sp;
+  ball.vy = Math.sin(a) * sp;
+}
+
+function clearInput() {
+  pointerRoles.clear();
+  btnCCW = btnCW = false;
+  drag.active = false; drag.id = null;
+  joy.active = false; joy.dx = joy.dy = 0; joy.id = null;
+}
+
+/* ============================================================
+   ЗБЕРЕЖЕННЯ
+   ============================================================ */
+function serializePlayer(p) {
+  return {
+    x: p.x, y: p.y, vx: p.vx, vy: p.vy, angle: p.angle,
+    sectors: p.sectors.map(s => ({ color: s.color, speedMul: s.speedMul, angleOff: s.angleOff }))
+  };
+}
+function restorePlayer(d, side) {
+  return {
+    side,
+    x: d.x, y: d.y, vx: d.vx, vy: d.vy, angle: d.angle,
+    sectors: d.sectors.map(s => ({ ...s })),
+    flash: 0, tx: d.x, ty: d.y
+  };
+}
+
+function saveGame() {
+  if (!ball || !red || !blue) return;
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      v: 2, screenW: W, screenH: H,
+      scoreRed, scoreBlue, humanRed, state, pauseT,
+      ball: { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy },
+      red:  serializePlayer(red),
+      blue: serializePlayer(blue)
+    }));
+  } catch (e) {}
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    if (d.v !== 2) return false;
+
+    scoreRed  = d.scoreRed  | 0;
+    scoreBlue = d.scoreBlue | 0;
+    humanRed  = !!d.humanRed;
+
+    const sx = (d.screenW > 1) ? W / d.screenW : 1;
+    const sy = (d.screenH > 1) ? H / d.screenH : 1;
+
+    ball = { x: d.ball.x*sx, y: d.ball.y*sy, vx: d.ball.vx*sx, vy: d.ball.vy*sy, r: BALL_R };
+    const rd = { ...d.red  }; rd.x *= sx; rd.y *= sy;
+    const bd = { ...d.blue }; bd.x *= sx; bd.y *= sy;
+    red  = restorePlayer(rd, -1);
+    blue = restorePlayer(bd,  1);
+
+    state  = d.state === 'pause' ? 'pause' : 'play';
+    pauseT = d.pauseT || 0;
+
+    buildSquares();
+    makeLabels();
+    return true;
+  } catch (e) { return false; }
+}
+
+/* ============================================================
+   ФІЗИКА
+   ============================================================ */
+function collideWalls(b) {
+  if (b.x < b.r)      { b.x = b.r;     b.vx =  Math.abs(b.vx); }
+  if (b.x > W - b.r)  { b.x = W - b.r; b.vx = -Math.abs(b.vx); }
+  if (b.y < b.r)      { b.y = b.r;     b.vy =  Math.abs(b.vy); }
+  if (b.y > H - b.r)  { b.y = H - b.r; b.vy = -Math.abs(b.vy); }
+}
+
+function collideSquare(b, sq) {
+  const cos = Math.cos(sq.a), sin = Math.sin(sq.a);
+  const dx = b.x - sq.x, dy = b.y - sq.y;
+  const lx =  dx * cos + dy * sin;
+  const ly = -dx * sin + dy * cos;
+  const h  = sq.s;
+  let nx, ny, pen;
+
+  if (Math.abs(lx) < h && Math.abs(ly) < h) {
+    const ex = h - Math.abs(lx), ey = h - Math.abs(ly);
+    if (ex < ey) { nx = Math.sign(lx) || 1; ny = 0; pen = ex + b.r; }
+    else         { nx = 0; ny = Math.sign(ly) || 1; pen = ey + b.r; }
+  } else {
+    const px = clamp(lx, -h, h);
+    const py = clamp(ly, -h, h);
+    nx = lx - px; ny = ly - py;
+    const d = Math.hypot(nx, ny);
+    if (d > b.r || d < 1e-9) return;
+    nx /= d; ny /= d; pen = b.r - d;
+  }
+
+  const wnx = nx * cos - ny * sin;
+  const wny = nx * sin + ny * cos;
+  b.x += wnx * pen;
+  b.y += wny * pen;
+
+  const dot = b.vx * wnx + b.vy * wny;
+  if (dot < 0) { b.vx -= 2*dot*wnx; b.vy -= 2*dot*wny; }
+}
+
+function collidePlayer(b, p) {
+  const dx = b.x - p.x, dy = b.y - p.y;
+  const d = Math.hypot(dx, dy);
+  const minD = b.r + PLAYER_R;
+  if (d >= minD || d < 1e-6) return;
+
+  const nx = dx / d, ny = dy / d;
+
+  let ang = Math.atan2(dy, dx) - p.angle;
+  ang = ((ang % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);
+  const idx = Math.floor(ang / (Math.PI*2 / SECTORS)) % SECTORS;
+  const mod = p.sectors[idx];
+
+  b.x = p.x + nx * (minD + 0.5);
+  b.y = p.y + ny * (minD + 0.5);
+
+  const dot = b.vx * nx + b.vy * ny;
+  if (dot >= 0) return;
+
+  let vx = b.vx - 2*dot*nx;
+  let vy = b.vy - 2*dot*ny;
+
+  const ca = Math.cos(mod.angleOff), sa = Math.sin(mod.angleOff);
+  const rx = vx*ca - vy*sa;
+  const ry = vx*sa + vy*ca;
+
+  let sp = clamp(Math.hypot(rx, ry) * mod.speedMul, BALL_MIN, BALL_MAX);
+  const l = Math.hypot(rx, ry) || 1;
+  b.vx = rx / l * sp;
+  b.vy = ry / l * sp;
+
+  p.flash = 0.25;
+}
+
+function checkGoal() {
+  const corners = [
+    { x: 0, y: 0, red: true  }, { x: 0, y: H, red: true  },
+    { x: W, y: 0, red: false }, { x: W, y: H, red: false }
+  ];
+  for (const c of corners) {
+    if (dist(ball.x, ball.y, c.x, c.y) < GOAL_R) {
+      if (c.red) scoreBlue += 1;
+      else       scoreRed  += 1;
+      state = 'pause'; pauseT = 1.0;
+      saveGame();
+      return true;
+    }
+  }
+  return false;
+}
+
+function moveBall(dt) {
+  const sp = Math.hypot(ball.vx, ball.vy) || 1;
+  const steps = Math.max(1, Math.ceil(sp * dt / 3));
+  const sdt = dt / steps;
+
+  for (let i = 0; i < steps; i++) {
+    ball.x += ball.vx * sdt;
+    ball.y += ball.vy * sdt;
+    if (checkGoal()) return;
+    collideWalls(ball);
+    for (let j = 0; j < squares.length; j++) collideSquare(ball, squares[j]);
+    collidePlayer(ball, red);
+    collidePlayer(ball, blue);
+  }
+
+  const s = Math.hypot(ball.vx, ball.vy);
+  if (s > 1e-6 && (s < BALL_MIN || s > BALL_MAX)) {
+    const t = clamp(s, BALL_MIN, BALL_MAX);
+    ball.vx = ball.vx / s * t;
+    ball.vy = ball.vy / s * t;
+  }
+}
+
+/* ============================================================
+   ШІ
+   ============================================================ */
+function predictBallY(targetX, maxT) {
+  maxT = maxT || 2.5;
+  let x = ball.x, y = ball.y, vx = ball.vx, vy = ball.vy;
+  if (Math.abs(vx) < 1) return null;
+  const dir = Math.sign(targetX - x);
+  if (Math.sign(vx) !== dir) return null;
+
+  const step = 1 / 180;
+  let t = 0;
+  while (t < maxT) {
+    x += vx * step; y += vy * step; t += step;
+    if (y < BALL_R)          { y = BALL_R + (BALL_R - y);            vy = -vy; }
+    else if (y > H - BALL_R) { y = H - BALL_R - (y - (H - BALL_R));  vy = -vy; }
+    if (dir > 0 ? x >= targetX : x <= targetX) return y;
+  }
+  return null;
+}
+
+function aimPosition(p) {
+  const corners = p.side < 0
+    ? [{ x: W, y: 0 }, { x: W, y: H }]
+    : [{ x: 0, y: 0 }, { x: 0, y: H }];
+
+  let best = corners[0], bd = Infinity;
+  for (const c of corners) {
+    const d = dist(c.x, c.y, ball.x, ball.y);
+    if (d < bd) { bd = d; best = c; }
+  }
+
+  let dx = best.x - ball.x, dy = best.y - ball.y;
+  const dl = Math.hypot(dx, dy) || 1;
+  dx /= dl; dy /= dl;
+
+  let vx = ball.vx, vy = ball.vy;
+  const vl = Math.hypot(vx, vy) || 1;
+  vx /= vl; vy /= vl;
+
+  let nx = vx - dx, ny = vy - dy;
+  const nl = Math.hypot(nx, ny);
+  if (nl < 1e-3) return null;
+  nx /= nl; ny /= nl;
+  if (vx*nx + vy*ny > 0) { nx = -nx; ny = -ny; }
+
+  const D = BALL_R + PLAYER_R + 3;
+  return { x: ball.x - nx*D, y: ball.y - ny*D };
+}
+
+/* ============================================================
+   ОНОВЛЕННЯ ГРАВЦЯ
+   ============================================================ */
+function updatePlayer(p, dt) {
+  const isHuman = humanRed && p.side < 0;
+
+  // обертання
+  if (isHuman) {
+    if (btnCCW || keys['q']) p.angle -= HUMAN_ROT * dt;
+    if (btnCW  || keys['e']) p.angle += HUMAN_ROT * dt;
+  } else {
+    p.angle += PLAYER_ROT * dt * (p.side < 0 ? 1 : -1);
+  }
+  if (p.flash > 0) p.flash -= dt;
+
+  const homeX = p.side < 0 ? PLAYER_R + 14 : W - PLAYER_R - 14;
+  const homeY = H / 2;
+  let tx, ty;
+
+  if (isHuman) {
+    let hasT = false;
+    tx = p.x; ty = p.y;
+
+    if (drag.active) {
+      tx = drag.x; ty = drag.y; hasT = true;
+    } else if (joy.active && Math.hypot(joy.dx, joy.dy) > 6) {
+      const B = getButtons();
+      const mag = Math.min(1, Math.hypot(joy.dx, joy.dy) / B.joy.r);
+      const ang = Math.atan2(joy.dy, joy.dx);
+      tx = p.x + Math.cos(ang) * 520 * mag;
+      ty = p.y + Math.sin(ang) * 520 * mag;
+      hasT = true;
+    } else {
+      const kx = (keys['d']||keys['arrowright']?1:0) - (keys['a']||keys['arrowleft']?1:0);
+      const ky = (keys['s']||keys['arrowdown'] ?1:0) - (keys['w']||keys['arrowup']  ?1:0);
+      if (kx !== 0 || ky !== 0) {
+        const ang = Math.atan2(ky, kx);
+        tx = p.x + Math.cos(ang) * 320;
+        ty = p.y + Math.sin(ang) * 320;
+        hasT = true;
+      } else if (mouseX >= 0 && mouseX < W / 2 + 30 && mouseY >= 0) {
+        tx = mouseX; ty = mouseY; hasT = true;
+      }
+    }
+    if (!hasT) { tx = p.x; ty = p.y; }
+  } else {
+    // ШІ
+    tx = homeX; ty = homeY;
+    const towardMe = (ball.vx * p.side) > 0;
+    const db = dist(ball.x, ball.y, p.x, p.y);
+
+    if (towardMe) {
+      const py = predictBallY(homeX);
+      ty = (py === null) ? ball.y : py;
+      if (db < 320) {
+        const aim = aimPosition(p);
+        if (aim) { tx = aim.x; ty = aim.y; }
+      }
+    } else {
+      const onMyHalf = (ball.x - W/2) * p.side > 0;
+      if (onMyHalf && db < 260) { tx = ball.x; ty = ball.y; }
+    }
+  }
+
+  p.tx = tx; p.ty = ty;
+
+  // рух до цілі
+  const dx = tx - p.x, dy = ty - p.y;
+  const d  = Math.hypot(dx, dy);
+
+  let dvx = 0, dvy = 0;
+  if (d > 2) {
+    const sp = Math.min(PLAYER_MAX, d * 5);
+    dvx = dx / d * sp;
+    dvy = dy / d * sp;
+  }
+
+  const accel = 2000;
+  p.vx += clamp(dvx - p.vx, -accel*dt, accel*dt);
+  p.vy += clamp(dvy - p.vy, -accel*dt, accel*dt);
+
+  const sp = Math.hypot(p.vx, p.vy);
+  if (sp > PLAYER_MAX) { p.vx = p.vx/sp*PLAYER_MAX; p.vy = p.vy/sp*PLAYER_MAX; }
+
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+
+  const minX = p.side < 0 ? PLAYER_R       : W/2 + PLAYER_R;
+  const maxX = p.side < 0 ? W/2 - PLAYER_R : W - PLAYER_R;
+  if (p.x < minX) { p.x = minX; if (p.vx < 0) p.vx = 0; }
+  if (p.x > maxX) { p.x = maxX; if (p.vx > 0) p.vx = 0; }
+  if (p.y < PLAYER_R)     { p.y = PLAYER_R;     if (p.vy < 0) p.vy = 0; }
+  if (p.y > H - PLAYER_R) { p.y = H - PLAYER_R; if (p.vy > 0) p.vy = 0; }
+}
+
+/* ============================================================
+   ОНОВЛЕННЯ
+   ============================================================ */
+function updateLabels(dt) {
+  for (const l of labels) {
+    l.x += l.vx * dt; l.y += l.vy * dt;
+    const m = 70;
+    if (l.x < m)     { l.x = m;     l.vx =  Math.abs(l.vx); }
+    if (l.x > W - m) { l.x = W - m; l.vx = -Math.abs(l.vx); }
+    if (l.y < m)     { l.y = m;     l.vy =  Math.abs(l.vy); }
+    if (l.y > H - m) { l.y = H - m; l.vy = -Math.abs(l.vy); }
+    l.t -= dt;
+    if (l.t <= 0) { l.t = rand(0.25, 0.6); l.color = lightColor(); }
+  }
+}
+
+function update(dt) {
+  updateLabels(dt);
+
+  if (state === 'pause') {
+    pauseT -= dt;
+    if (pauseT <= 0) { resetPositions(); state = 'play'; }
+    return;
+  }
+
+  for (let i = 0; i < squares.length; i++) squares[i].a += SQ_ROT * dt;
+
+  updatePlayer(red, dt);
+  updatePlayer(blue, dt);
+  moveBall(dt);
+
+  saveT += dt;
+  if (saveT > 2.5) { saveT = 0; saveGame(); }
+}
+
+/* ============================================================
+   МАЛЮВАННЯ ПОЛЯ
+   ============================================================ */
+function drawGoals() {
+  const g = [
+    { x: 0, y: 0, a0: 0,            a1: Math.PI/2,   c: '255,70,70'  },
+    { x: 0, y: H, a0: -Math.PI/2,   a1: 0,           c: '255,70,70'  },
+    { x: W, y: 0, a0: Math.PI/2,    a1: Math.PI,     c: '80,130,255' },
+    { x: W, y: H, a0: Math.PI,      a1: Math.PI*1.5, c: '80,130,255' }
+  ];
+  for (const c of g) {
+    const grad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, GOAL_R);
+    grad.addColorStop(0,    'rgba(' + c.c + ',0.42)');
+    grad.addColorStop(0.75, 'rgba(' + c.c + ',0.12)');
+    grad.addColorStop(1,    'rgba(' + c.c + ',0)');
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.arc(c.x, c.y, GOAL_R, c.a0, c.a1);
+    ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, GOAL_R, c.a0, c.a1);
+    ctx.strokeStyle = 'rgba(' + c.c + ',0.75)';
+    ctx.lineWidth = 2; ctx.stroke();
+  }
+}
+
+function drawSquares() {
+  ctx.lineWidth = 1.6;
+  for (let i = 0; i < squares.length; i++) {
+    const sq = squares[i];
+    ctx.save();
+    ctx.translate(sq.x, sq.y);
+    ctx.rotate(sq.a);
+    ctx.strokeStyle = sq.color;
+    ctx.strokeRect(-sq.s, -sq.s, sq.s*2, sq.s*2);
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.fillRect(-sq.s, -sq.s, sq.s*2, sq.s*2);
+    ctx.restore();
+  }
+}
+
+function drawBall() {
+  const g = ctx.createRadialGradient(ball.x, ball.y, 0, ball.x, ball.y, BALL_R * 3.2);
+  g.addColorStop(0, 'rgba(255,225,60,0.55)');
+  g.addColorStop(1, 'rgba(255,225,60,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(ball.x, ball.y, BALL_R*3.2, 0, Math.PI*2); ctx.fill();
+
+  ctx.beginPath(); ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI*2);
+  ctx.fillStyle = '#ffd93b'; ctx.fill();
+
+  ctx.beginPath(); ctx.arc(ball.x, ball.y, BALL_R*0.5, 0, Math.PI*2);
+  ctx.fillStyle = '#ffffff'; ctx.fill();
+}
+
+function drawPlayer(p) {
+  const isRed = p.side < 0;
+  const rgb   = isRed ? '255,70,70' : '80,130,255';
+  const isHuman = humanRed && isRed;
+
+  ctx.save();
+  ctx.translate(p.x, p.y);
+
+  const glow = ctx.createRadialGradient(0,0, PLAYER_R*0.5, 0,0, PLAYER_R*2);
+  glow.addColorStop(0, 'rgba(' + rgb + ',' + (p.flash > 0 ? 0.6 : 0.25) + ')');
+  glow.addColorStop(1, 'rgba(' + rgb + ',0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(0,0, PLAYER_R*2, 0, Math.PI*2); ctx.fill();
+
+  ctx.rotate(p.angle);
+
+  ctx.beginPath(); ctx.arc(0,0, PLAYER_R, 0, Math.PI*2);
+  ctx.fillStyle = isRed ? '#3a0a0a' : '#0a1440'; ctx.fill();
+
+  const innerR = PLAYER_R * 0.5;
+  const step   = (Math.PI*2) / SECTORS;
+  for (let i = 0; i < SECTORS; i++) {
+    const a0 = i*step;
+    ctx.beginPath();
+    ctx.moveTo(0,0);
+    ctx.arc(0,0, innerR, a0, a0+step);
+    ctx.closePath();
+    ctx.fillStyle = p.sectors[i].color;
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.13)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < SECTORS; i++) {
+    const a0 = i*step;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a0)*innerR, Math.sin(a0)*innerR);
+    ctx.lineTo(Math.cos(a0)*PLAYER_R, Math.sin(a0)*PLAYER_R);
+    ctx.stroke();
+  }
+
+  ctx.beginPath(); ctx.arc(0,0, PLAYER_R, 0, Math.PI*2);
+  ctx.strokeStyle = isHuman ? '#ffffff' : (isRed ? '#ff4a4a' : '#4a7bff');
+  ctx.lineWidth = isHuman ? 5 : 4;
+  ctx.stroke();
+
+  // кільце для обертання — тонке, коли людина
+  if (isHuman) {
+    ctx.beginPath(); ctx.arc(0,0, PLAYER_R*1.35, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/* ============================================================
+   ТОЧКА-ЦІЛЬ
+   ============================================================ */
+function drawTarget(p) {
+  if (!humanRed || p.side !== -1) return;
+  if (p.tx === undefined) return;
+
+  const tx = clamp(p.tx, PLAYER_R, W/2 - PLAYER_R);
+  const ty = clamp(p.ty, PLAYER_R, H - PLAYER_R);
+  if (dist(tx, ty, p.x, p.y) < 10) return;
+
+  const t = performance.now() / 1000;
+  const pulse = 0.5 + 0.5 * Math.sin(t * 6);
+
+  ctx.save();
+  ctx.setLineDash([5, 9]);
+  ctx.strokeStyle = 'rgba(255,255,255,' + (0.12 + 0.10*pulse) + ')';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y); ctx.lineTo(tx, ty);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const R = 11 + 3*pulse;
+  ctx.strokeStyle = 'rgba(255,255,255,' + (0.45 + 0.35*pulse) + ')';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(tx, ty, R, 0, Math.PI*2); ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(tx - R - 5, ty); ctx.lineTo(tx - R + 4, ty);
+  ctx.moveTo(tx + R - 4, ty); ctx.lineTo(tx + R + 5, ty);
+  ctx.moveTo(tx, ty - R - 5); ctx.lineTo(tx, ty - R + 4);
+  ctx.moveTo(tx, ty + R - 4); ctx.lineTo(tx, ty + R + 5);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ============================================================
+   СЕНСОРНИЙ UI
+   ============================================================ */
+function drawRotateGlyph(radius, clockwise, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle   = color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+
+  if (clockwise) {
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, -1.9*Math.PI, -0.5*Math.PI, false);
+    ctx.stroke();
+    const s = 7;
+    ctx.beginPath();
+    ctx.moveTo(s, -radius);
+    ctx.lineTo(0, -radius - 0.7*s);
+    ctx.lineTo(0, -radius + 0.7*s);
+    ctx.closePath(); ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0.9*Math.PI, -0.5*Math.PI, true);
+    ctx.stroke();
+    const s = 7;
+    ctx.beginPath();
+    ctx.moveTo(-s, -radius);
+    ctx.lineTo(0, -radius - 0.7*s);
+    ctx.lineTo(0, -radius + 0.7*s);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawCircleBtn(b, borderColor, label) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(10,15,30,0.7)'; ctx.fill();
+  ctx.strokeStyle = borderColor; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.fillStyle = borderColor;
+  ctx.font = 'bold ' + Math.floor(b.r * 0.46) + 'px ui-monospace, Consolas, monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, b.x, b.y + 1);
+  ctx.restore();
+}
+
+function drawRotateBtn(b, clockwise, pressed) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+  ctx.fillStyle = pressed ? 'rgba(255,70,70,0.28)' : 'rgba(10,15,30,0.7)';
+  ctx.fill();
+  ctx.strokeStyle = pressed ? '#ff8080' : 'rgba(255,120,120,0.75)';
+  ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.translate(b.x, b.y);
+  drawRotateGlyph(b.r * 0.48, clockwise, pressed ? '#ffffff' : '#ffc0c0');
+  ctx.restore();
+}
+
+function drawJoystick(b) {
+  // база
+  ctx.save();
+  ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+  ctx.fillStyle = joy.active ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.05)';
+  ctx.fill();
+  ctx.strokeStyle = joy.active ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 2; ctx.stroke();
+
+  // напрямний хрест
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(b.x - b.r*0.7, b.y); ctx.lineTo(b.x + b.r*0.7, b.y);
+  ctx.moveTo(b.x, b.y - b.r*0.7); ctx.lineTo(b.x, b.y + b.r*0.7);
+  ctx.stroke();
+
+  // ручка
+  const kx = b.x + joy.dx;
+  const ky = b.y + joy.dy;
+  ctx.beginPath(); ctx.arc(kx, ky, b.r * 0.42, 0, Math.PI*2);
+  ctx.fillStyle = joy.active ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.3)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.restore();
+}
+
+function drawTouchUI() {
+  const B = getButtons();
+
+  // кнопка перемикання (завжди)
+  drawCircleBtn(B.toggle,
+    humanRed ? '#4ade80' : 'rgba(170,180,200,0.75)',
+    humanRed ? 'ТИ' : 'АВТО');
+
+  if (humanRed) {
+    drawRotateBtn(B.ccw, false, btnCCW);
+    drawRotateBtn(B.cw,  true,  btnCW);
+    drawJoystick(B.joy);
+  }
+}
+
+/* ============================================================
+   HUD + РЕНДЕР
+   ============================================================ */
+function drawScoreLabels() {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const l of labels) {
+    const val = l.side < 0 ? scoreRed : scoreBlue;
+    ctx.font = 'bold 44px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = l.color;
+    ctx.shadowColor = l.color; ctx.shadowBlur = 22;
+    ctx.fillText(String(val), l.x, l.y);
+    ctx.shadowBlur = 0;
+    ctx.font = 'bold 13px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = l.side < 0 ? 'rgba(255,90,90,0.85)' : 'rgba(120,160,255,0.85)';
+    ctx.fillText(l.side < 0 ? 'ЧЕРВОНИЙ' : 'СИНІЙ', l.x, l.y - 34);
+  }
+}
+
+function drawHUD() {
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.font = 'bold 11px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillText('H / АВТО — режим · R — нова гра', W/2, 14);
+  ctx.restore();
+}
+
+function render() {
+  ctx.fillStyle = '#070912';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = 'rgba(255,60,60,0.045)';
+  ctx.fillRect(0, 0, W/2, H);
+  ctx.fillStyle = 'rgba(60,110,255,0.045)';
+  ctx.fillRect(W/2, 0, W/2, H);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+
+  drawGoals();
+  drawSquares();
+  drawTarget(red);
+  drawBall();
+  drawPlayer(red);
+  drawPlayer(blue);
+  drawScoreLabels();
+  drawHUD();
+  drawTouchUI();
+
+  if (state === 'pause') {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold 56px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.shadowColor = '#fff'; ctx.shadowBlur = 30;
+    ctx.fillText('ГОЛ!', W/2, H/2);
+    ctx.shadowBlur = 0;
+  }
+}
+
+/* ============================================================
+   ВВІД: POINTER EVENTS
+   ============================================================ */
+function getPos(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function toggleHuman() {
+  humanRed = !humanRed;
+  clearInput();
+  saveGame();
+}
+
+function resetGame() {
+  localStorage.removeItem(SAVE_KEY);
+  initGame();
+  saveGame();
+}
+
+function onPointerDown(e) {
+  const p = getPos(e);
+  const B = getButtons();
+  const dToggle = dist(p.x, p.y, B.toggle.x, B.toggle.y);
+
+  // 1) кнопка перемикання
+  if (dToggle < B.toggle.r * 1.35) {
+    pointerRoles.set(e.pointerId, 'toggle');
+    toggleHuman();
+    return;
+  }
+
+  if (!humanRed) return;    // далі — тільки для людини
+
+  // 2) кнопки кута
+  if (dist(p.x, p.y, B.ccw.x, B.ccw.y) < B.ccw.r * 1.4) {
+    pointerRoles.set(e.pointerId, 'ccw');
+    btnCCW = true;
+    return;
+  }
+  if (dist(p.x, p.y, B.cw.x, B.cw.y) < B.cw.r * 1.4) {
+    pointerRoles.set(e.pointerId, 'cw');
+    btnCW = true;
+    return;
+  }
+
+  // 3) прямий дотик до червоного: кільце / тіло
+  const dr = dist(p.x, p.y, red.x, red.y);
+  if (dr < PLAYER_R * 1.85) {
+    if (dr < PLAYER_R * 0.8) {
+      // тіло — тягнемо (рух)
+      drag.active = true; drag.x = p.x; drag.y = p.y; drag.id = e.pointerId;
+      pointerRoles.set(e.pointerId, 'drag');
+    } else {
+      // кільце — обертаємо кут
+      pointerRoles.set(e.pointerId, 'rot');
+      red.angle = Math.atan2(p.y - red.y, p.x - red.x);
+    }
+    return;
+  }
+
+  // 4) джойстик
+  if (dist(p.x, p.y, B.joy.x, B.joy.y) < B.joy.actR) {
+    joy.active = true; joy.id = e.pointerId;
+    const dx = p.x - B.joy.x, dy = p.y - B.joy.y;
+    const d = Math.hypot(dx, dy);
+    const m = Math.min(d, B.joy.r);
+    if (d > 0.001) { joy.dx = dx/d*m; joy.dy = dy/d*m; }
+    else { joy.dx = joy.dy = 0; }
+    pointerRoles.set(e.pointerId, 'joy');
+    return;
+  }
+}
+
+function onPointerMove(e) {
+  const p = getPos(e);
+  const B = getButtons();
+  const role = pointerRoles.get(e.pointerId);
+
+  if (role === 'drag') { drag.x = p.x; drag.y = p.y; return; }
+  if (role === 'rot') {
+    red.angle = Math.atan2(p.y - red.y, p.x - red.x);
+    return;
+  }
+  if (role === 'joy') {
+    const dx = p.x - B.joy.x, dy = p.y - B.joy.y;
+    const d = Math.hypot(dx, dy);
+    const m = Math.min(d, B.joy.r);
+    if (d > 0.001) { joy.dx = dx/d*m; joy.dy = dy/d*m; }
+    else { joy.dx = joy.dy = 0; }
+    return;
+  }
+
+  // миша без натискання — ціль руху
+  if (e.pointerType === 'mouse') { mouseX = p.x; mouseY = p.y; }
+}
+
+function onPointerUp(e) {
+  const role = pointerRoles.get(e.pointerId);
+  if (!role) return;
+  pointerRoles.delete(e.pointerId);
+
+  if (role === 'ccw') btnCCW = false;
+  if (role === 'cw')  btnCW  = false;
+  if (role === 'drag') { drag.active = false; drag.id = null; }
+  if (role === 'joy')  { joy.active = false; joy.dx = joy.dy = 0; joy.id = null; }
+}
+
+function onPointerLeave(e) {
+  if (e.pointerType === 'mouse') { mouseX = mouseY = -1; }
+}
+
+/* ============================================================
+   КЛАВІАТУРА (десктоп)
+   ============================================================ */
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  const used = ['w','a','s','d','q','e','arrowup','arrowdown','arrowleft','arrowright','h','r'];
+  if (used.includes(k)) e.preventDefault();
+  if (!keys[k]) {
+    if (k === 'h') toggleHuman();
+    if (k === 'r') resetGame();
+  }
+  keys[k] = true;
+});
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+canvas.addEventListener('pointerdown', e => { e.preventDefault(); onPointerDown(e); }, { passive: false });
+canvas.addEventListener('pointermove', e => { e.preventDefault(); onPointerMove(e); }, { passive: false });
+canvas.addEventListener('pointerup',   e => { e.preventDefault(); onPointerUp(e);   }, { passive: false });
+canvas.addEventListener('pointercancel', e => { onPointerUp(e); });
+canvas.addEventListener('pointerleave', onPointerLeave);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+/* ============================================================
+   ЦИКЛ
+   ============================================================ */
+let last = performance.now();
+function loop(now) {
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.05) dt = 0.05;
+  if (dt < 0)    dt = 0;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+/* ============================================================
+   РЕСАЙЗ
+   ============================================================ */
+function onResize() {
+  const oldW = W, oldH = H;
+  resize();
+  if (!ball) { initGame(); return; }
+  if (oldW > 1 && oldH > 1) {
+    const sx = W / oldW, sy = H / oldH;
+    ball.x *= sx; ball.y *= sy;
+    red.x  *= sx; red.y  *= sy;
+    blue.x *= sx; blue.y *= sy;
+  }
+  buildSquares();
+  clampAll();
+}
+
+function clampAll() {
+  ball.x = clamp(ball.x, BALL_R, W - BALL_R);
+  ball.y = clamp(ball.y, BALL_R, H - BALL_R);
+  red.x  = clamp(red.x,  PLAYER_R, W/2 - PLAYER_R);
+  red.y  = clamp(red.y,  PLAYER_R, H - PLAYER_R);
+  blue.x = clamp(blue.x, W/2 + PLAYER_R, W - PLAYER_R);
+  blue.y = clamp(blue.y, PLAYER_R, H - PLAYER_R);
+}
+
+/* ============================================================
+   СТАРТ
+   ============================================================ */
+resize();
+if (!loadGame()) initGame();
+saveGame();
+
+window.addEventListener('resize', onResize);
+window.addEventListener('beforeunload', saveGame);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
+
+requestAnimationFrame(function (t) { last = t; loop(t); });
+
+})();
+</script>
+</body>
+</html>    
